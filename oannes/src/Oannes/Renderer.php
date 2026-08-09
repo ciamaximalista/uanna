@@ -8,6 +8,7 @@ final class Renderer
     private readonly ActorRepository $actors;
     private readonly InteractionService $interactions;
     private array $actorInfoCache = [];
+    private array $canonicalIdCache = [];
 
     public function __construct(
         private readonly ObjectRepository $repo,
@@ -174,9 +175,7 @@ final class Renderer
         );
         $objects = $this->sortObjectsForProfile($this->publicObjects($objects));
 
-        foreach ($objects as $object) {
-            $items .= $this->objectCard($object, false);
-        }
+        $items = $this->profileTimeline($objects);
 
         $name = Html::escape((string)($user['name'] ?? $uid));
         $bio = Html::escape((string)($user['bio'] ?? ''));
@@ -218,6 +217,96 @@ final class Renderer
         ));
 
         return array_slice($objects, 0, 80);
+    }
+
+    private function profileTimeline(array $objects): string
+    {
+        $html = '';
+        $renderedRoots = [];
+
+        foreach ($objects as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+
+            $tree = $this->treeFor($this->profileThreadObjects($object));
+
+            foreach ($tree as $node) {
+                if (!is_array($node['object'] ?? null)) {
+                    continue;
+                }
+
+                $rootId = ActivityPub::objectId($node['object']);
+                if ($rootId !== null && isset($renderedRoots[$rootId])) {
+                    continue;
+                }
+
+                if ($rootId !== null) {
+                    $renderedRoots[$rootId] = true;
+                }
+
+                $html .= $this->objectCard($node['object'], false, [
+                    'children' => $node['children'] ?? [],
+                ]);
+            }
+        }
+
+        return $html !== '' ? $html : '<p class="muted">Todavía no hay publicaciones públicas.</p>';
+    }
+
+    private function profileThreadObjects(array $object): array
+    {
+        $objectsById = [];
+        $lineage = $this->publicLineage($object);
+        $root = $lineage[0] ?? $object;
+
+        foreach ($lineage as $lineageObject) {
+            $this->addThreadObject($objectsById, $lineageObject);
+        }
+
+        $rootId = ActivityPub::objectId($root);
+        if ($rootId !== null) {
+            foreach ($this->replyDescendants($rootId) as $descendant) {
+                $this->addThreadObject($objectsById, $descendant);
+            }
+        }
+
+        $this->addThreadObject($objectsById, $object);
+
+        return array_values($objectsById);
+    }
+
+    private function publicLineage(array $object): array
+    {
+        $lineage = [$object];
+        $seen = [];
+        $current = $object;
+
+        for ($depth = 0; $depth < 8; $depth++) {
+            $parent = ActivityPub::inReplyTo($current);
+            if ($parent === null || isset($seen[$parent])) {
+                break;
+            }
+
+            $seen[$parent] = true;
+            $parentObject = $this->repo->findByIdOrAlias($parent);
+            if ($parentObject === null || !ActivityPub::isPublicObject($parentObject)) {
+                break;
+            }
+
+            array_unshift($lineage, $parentObject);
+            $current = $parentObject;
+        }
+
+        return $lineage;
+    }
+
+    private function addThreadObject(array &$objectsById, array $object): void
+    {
+        $id = ActivityPub::objectId($object);
+        if ($id !== null) {
+            $objectsById[$this->canonicalObjectId($id)] = $object;
+        }
     }
 
     public function objectPage(string $id): string
@@ -266,6 +355,8 @@ final class Renderer
         $boostedAt = is_string($object['_oannes_boosted_at'] ?? null) ? $object['_oannes_boosted_at'] : '';
         $boostedHuman = DateFormat::human($boostedAt, (string)($this->config['timezone'] ?? 'Europe/Madrid'));
         $class = $child ? 'object child' : 'object';
+        $anchor = $id !== '' ? $this->postAnchor($id) : '';
+        $anchorAttr = $anchor !== '' ? ' id="' . Html::escape($anchor) . '"' : '';
         $url = $this->publicUrl(['id' => $id]);
         $interactionActors = $this->interactions->actors($object);
         $children = is_array($options['children'] ?? null) ? $options['children'] : [];
@@ -283,7 +374,7 @@ final class Renderer
 
         $boostHtml = $boostedAt !== '' ? '<p class="boost-marker">Impulsado <time datetime="' . Html::escape($boostedAt) . '">' . Html::escape($boostedHuman) . '</time></p>' : '';
 
-        return '<article class="' . $class . '">'
+        return '<article class="' . $class . '"' . $anchorAttr . '>'
             . $boostHtml
             . '<header class="object-head">' . $avatarHtml . '<div>'
             . '<p class="meta post-meta"><strong>' . Html::escape($actorInfo['label']) . '</strong><br/>'
@@ -311,11 +402,13 @@ final class Renderer
         $likeLabel = $liked ? 'Quitar fav' : 'Favoritear';
         $boostLabel = $boosted ? 'Quitar impulso' : 'Impulsar';
         $replyModal = $this->replyModal($id, $csrf);
+        $returnTo = Html::escape($this->currentPageWithAnchor($this->postAnchor($id)));
 
         return '<footer class="post-actions">'
             . '<form method="post" action="?route=admin/react">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
+            . '<input type="hidden" name="return_to" value="' . $returnTo . '"/>'
             . '<button type="submit" name="type" value="Like">' . $likeLabel . '</button>'
             . '<button type="submit" name="type" value="Announce">' . $boostLabel . '</button>'
             . '</form>'
@@ -346,6 +439,19 @@ final class Renderer
             . '</form>'
             . '</article>'
             . '</section>';
+    }
+
+    private function postAnchor(string $id): string
+    {
+        return 'post-' . substr(Id::digest($id), 0, 12);
+    }
+
+    private function currentPageWithAnchor(string $anchor): string
+    {
+        $uri = (string)($_SERVER['REQUEST_URI'] ?? $this->publicUrl());
+        $uri = preg_replace('/#.*$/', '', $uri) ?? $uri;
+
+        return $uri . '#' . $anchor;
     }
 
     private function ownPostActions(array $object, ?array $actions): string
@@ -505,6 +611,7 @@ final class Renderer
 
         foreach ($order as $id) {
             $parent = ActivityPub::inReplyTo($nodes[$id]['object']);
+            $parent = $parent !== null ? $this->canonicalObjectId($parent) : null;
             if ($parent !== null && isset($nodes[$parent])) {
                 $nodes[$parent]['children'][] = &$nodes[$id];
             }
@@ -514,6 +621,7 @@ final class Renderer
         $roots = [];
         foreach ($order as $id) {
             $parent = ActivityPub::inReplyTo($nodes[$id]['object']);
+            $parent = $parent !== null ? $this->canonicalObjectId($parent) : null;
             if ($parent === null || !isset($nodes[$parent])) {
                 $roots[] = $nodes[$id];
             }
@@ -525,6 +633,18 @@ final class Renderer
         ));
 
         return $roots;
+    }
+
+    private function canonicalObjectId(string $id): string
+    {
+        if (isset($this->canonicalIdCache[$id])) {
+            return $this->canonicalIdCache[$id];
+        }
+
+        $object = $this->repo->findByIdOrAlias($id);
+        $canonical = is_array($object) ? (ActivityPub::objectId($object) ?? $id) : $id;
+
+        return $this->canonicalIdCache[$id] = $canonical;
     }
 
     private function replyTree(string $id): array

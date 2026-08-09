@@ -944,6 +944,7 @@ final class Router
         $csrf = $_POST['csrf'] ?? null;
         $id = $_POST['id'] ?? null;
         $type = $_POST['type'] ?? null;
+        $returnTo = $_POST['return_to'] ?? null;
 
         if (
             !$auth->checkCsrf(is_string($csrf) ? $csrf : null)
@@ -968,7 +969,28 @@ final class Router
             return;
         }
 
-        header('Location: ' . $this->homeLocation());
+        header('Location: ' . $this->safeReturnLocation(is_string($returnTo) ? $returnTo : null));
+    }
+
+    private function safeReturnLocation(?string $location): string
+    {
+        if ($location === null || $location === '') {
+            return $this->homeLocation();
+        }
+
+        if (str_contains($location, "\r") || str_contains($location, "\n")) {
+            return $this->homeLocation();
+        }
+
+        if (str_starts_with($location, '//')) {
+            return $this->homeLocation();
+        }
+
+        if (str_starts_with($location, '/') || str_starts_with($location, '?')) {
+            return $location;
+        }
+
+        return $this->homeLocation();
     }
 
     private function adminPrivateMessage(string $method): void
