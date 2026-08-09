@@ -545,6 +545,21 @@ h3 {
     color: var(--accent-strong);
 }
 
+.post-actions .reply-link {
+    min-height: 2.15rem;
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.88rem;
+}
+
+.post-actions .reply-link:hover,
+.post-actions .reply-link:focus-visible {
+    background: var(--panel-2);
+    color: var(--accent-strong);
+}
+
 .own-post-actions,
 .modal-actions {
     display: flex;
@@ -1343,7 +1358,8 @@ main > *,
         grid-template-columns: 1fr 1fr;
     }
 
-    .post-actions button {
+    .post-actions button,
+    .post-actions .reply-link {
         width: 100%;
     }
 

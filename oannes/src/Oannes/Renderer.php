@@ -310,6 +310,7 @@ final class Renderer
         $boosted = $uid !== '' && $this->interactions->hasLocalReactionForCanonicalId($uid, $id, 'Announce');
         $likeLabel = $liked ? 'Quitar fav' : 'Favoritear';
         $boostLabel = $boosted ? 'Quitar impulso' : 'Impulsar';
+        $replyModal = $this->replyModal($id, $csrf);
 
         return '<footer class="post-actions">'
             . '<form method="post" action="?route=admin/react">'
@@ -318,9 +319,33 @@ final class Renderer
             . '<button type="submit" name="type" value="Like">' . $likeLabel . '</button>'
             . '<button type="submit" name="type" value="Announce">' . $boostLabel . '</button>'
             . '</form>'
+            . '<a class="button-link reply-link" href="#reply-' . Html::escape(substr(Id::digest($id), 0, 12)) . '">Responder</a>'
             . $ownActions
             . '<div class="post-stats">' . $stats . '</div>'
+            . $replyModal
             . '</footer>';
+    }
+
+    private function replyModal(string $id, string $csrf): string
+    {
+        $suffix = Html::escape(substr(Id::digest($id), 0, 12));
+        $encodedId = Html::escape($id);
+
+        return '<section id="reply-' . $suffix . '" class="modal-overlay" aria-label="Responder">'
+            . '<a class="modal-backdrop" href="#" aria-label="Cerrar"></a>'
+            . '<article class="compose-modal">'
+            . '<header><h2>Responder</h2><a class="modal-close" href="#" aria-label="Cerrar">×</a></header>'
+            . '<form method="post" action="?route=admin/post" enctype="multipart/form-data">'
+            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+            . '<input type="hidden" name="inReplyTo" value="' . $encodedId . '"/>'
+            . '<label>Texto <textarea name="content" rows="7" required></textarea></label>'
+            . '<label>Visibilidad <select name="visibility"><option value="public">Pública</option><option value="followers">Seguidores</option></select></label>'
+            . '<label>Imagen <input name="image_upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp"/></label>'
+            . '<label>Texto alt <textarea name="image_alt" rows="3"></textarea></label>'
+            . '<div class="modal-actions"><button type="submit">Enviar</button><a class="button-link secondary" href="#">Cancelar</a></div>'
+            . '</form>'
+            . '</article>'
+            . '</section>';
     }
 
     private function ownPostActions(array $object, ?array $actions): string
