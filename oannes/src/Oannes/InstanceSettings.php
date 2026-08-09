@@ -35,7 +35,7 @@ final class InstanceSettings
             }
         }
 
-        foreach (['instance_name', 'presentation_html'] as $field) {
+        foreach (['instance_name', 'presentation_html', 'update_mode'] as $field) {
             if (array_key_exists($field, $fields) && is_string($fields[$field])) {
                 $settings[$field] = trim($fields[$field]);
             }

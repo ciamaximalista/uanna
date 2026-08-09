@@ -100,6 +100,28 @@ final class InteractionService
         return array_slice($objects, 0, $limit);
     }
 
+    public function hasLocalReaction(string $uid, string $objectId, string $type): bool
+    {
+        if (!in_array($type, ['Like', 'Announce'], true)) {
+            return false;
+        }
+
+        $repo = new ObjectRepository($this->store);
+        $object = $repo->findByIdOrAlias($objectId);
+        $canonicalObjectId = $object !== null ? (ActivityPub::objectId($object) ?? $objectId) : $objectId;
+
+        return is_file($this->localPath($uid, $type, $canonicalObjectId));
+    }
+
+    public function toggle(string $uid, string $objectId, string $type): array
+    {
+        if ($this->hasLocalReaction($uid, $objectId, $type)) {
+            return $this->undo($uid, $objectId, $type);
+        }
+
+        return $this->react($uid, $objectId, $type);
+    }
+
     public function react(string $uid, string $objectId, string $type): array
     {
         if (!in_array($type, ['Like', 'Announce'], true)) {
@@ -153,6 +175,59 @@ final class InteractionService
         return [
             'ok' => true,
             'type' => $type,
+            'object' => $canonicalObjectId,
+        ];
+    }
+
+    public function undo(string $uid, string $objectId, string $type): array
+    {
+        if (!in_array($type, ['Like', 'Announce'], true)) {
+            throw new \InvalidArgumentException('Interacción no válida.');
+        }
+
+        $repo = new ObjectRepository($this->store);
+        $object = $repo->findByIdOrAlias($objectId);
+        if ($object === null) {
+            throw new \InvalidArgumentException('Mensaje no encontrado.');
+        }
+
+        $canonicalObjectId = ActivityPub::objectId($object) ?? $objectId;
+        $path = $this->localPath($uid, $type, $canonicalObjectId);
+        if (!is_file($path)) {
+            return [
+                'ok' => true,
+                'type' => 'Undo',
+                'object' => $canonicalObjectId,
+                'already_absent' => true,
+            ];
+        }
+
+        $activity = $this->readJsonFile($path);
+        @unlink($path);
+
+        $actorId = $this->users->actorId($uid);
+        $stamp = sprintf('%.6F', microtime(true));
+        $undo = [
+            '@context' => 'https://www.w3.org/ns/activitystreams',
+            'id' => rtrim((string)$this->config['base_url'], '/') . '/u/' . rawurlencode($uid)
+                . '/activity/undo/' . strtolower($type) . '/' . $stamp,
+            'type' => 'Undo',
+            'actor' => $actorId,
+            'object' => $activity,
+            'published' => gmdate('c'),
+            'to' => ['https://www.w3.org/ns/activitystreams#Public'],
+        ];
+
+        if ($type === 'Announce') {
+            $undo['cc'] = [$actorId . '/followers'];
+        }
+
+        $this->enqueueDeliveries($uid, $undo, $object);
+
+        return [
+            'ok' => true,
+            'type' => 'Undo',
+            'undone_type' => $type,
             'object' => $canonicalObjectId,
         ];
     }

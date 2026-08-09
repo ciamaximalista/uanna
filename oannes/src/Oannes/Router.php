@@ -566,7 +566,7 @@ final class Router
         return [$uid, $auth];
     }
 
-    private function instanceAdmin(?string $message = null, ?string $error = null): void
+    private function instanceAdmin(?string $message = null, ?string $error = null, string $openBox = ''): void
     {
         [$uid, $auth] = $this->requireInstanceAdmin();
         $settings = new InstanceSettings($this->store, $this->config);
@@ -578,7 +578,8 @@ final class Router
             $settings->blockedServers(),
             $settings->blockNotices(),
             $message,
-            $error
+            $error,
+            $openBox
         );
     }
 
@@ -593,10 +594,21 @@ final class Router
         try {
             $assets = new InstanceAssetService([...$this->config, 'public_dir' => dirname(__DIR__, 2) . '/public']);
             $fields = [];
+            $savedUpdateMode = false;
             foreach (['instance_name', 'presentation_html'] as $field) {
                 if (is_string($_POST[$field] ?? null)) {
                     $fields[$field] = $_POST[$field];
                 }
+            }
+
+            if (is_string($_POST['update_mode'] ?? null)) {
+                $mode = $_POST['update_mode'];
+                if (!in_array($mode, ['activity', 'cron'], true)) {
+                    throw new \RuntimeException('Modo de actualización no válido.');
+                }
+
+                $fields['update_mode'] = $mode;
+                $savedUpdateMode = true;
             }
 
             foreach (['favicon', 'default_avatar', 'default_header'] as $field) {
@@ -611,7 +623,7 @@ final class Router
             return;
         }
 
-        $this->instanceAdmin('Instancia guardada.');
+        $this->instanceAdmin('Instancia guardada.', null, $savedUpdateMode ? 'updates' : '');
     }
 
     private function instanceAdminServerBlocks(string $method): void
@@ -926,13 +938,13 @@ final class Router
                 new SocialGraph($this->store),
                 new ActorRepository($this->store),
                 $this->config,
-            ))->react($uid, $id, $type);
+            ))->toggle($uid, $id, $type);
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
             return;
         }
 
-        echo $this->adminDashboard($uid, $auth, $type === 'Like' ? 'Favorito guardado.' : 'Impulso guardado.');
+        header('Location: ' . $this->homeLocation());
     }
 
     private function adminPrivateMessage(string $method): void
@@ -1401,6 +1413,10 @@ final class Router
     private function refreshTimelineInbox(): void
     {
         if ($this->timelineInboxRefreshed || !(bool)($this->config['inbox_enabled'] ?? false)) {
+            return;
+        }
+
+        if (((new InstanceSettings($this->store, $this->config))->all()['update_mode'] ?? 'activity') === 'cron') {
             return;
         }
 

@@ -43,7 +43,7 @@ final class AdminRenderer
             . '</form></section>');
     }
 
-    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockNotices, ?string $message = null, ?string $error = null): string
+    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockNotices, ?string $message = null, ?string $error = null, string $openBox = ''): string
     {
         $csrf = Html::escape($this->auth->csrfToken());
         $messageHtml = $message !== null ? '<p class="notice">' . Html::escape($message) . '</p>' : '';
@@ -55,6 +55,26 @@ final class AdminRenderer
             . '<label>Nombre de Instancia <input name="instance_name" value="' . $instanceName . '" placeholder="Uanna"/></label>'
             . '<label>Presentación de instancia (html) <textarea name="presentation_html" rows="8">' . $presentationHtml . '</textarea></label>'
             . '<button type="submit">Guardar instancia</button>'
+            . '</form>';
+        $updateMode = (string)($settings['update_mode'] ?? 'activity');
+        $updateMode = in_array($updateMode, ['activity', 'cron'], true) ? $updateMode : 'activity';
+        $installDir = dirname(__DIR__, 3);
+        $queueCommand = 'php oannes/bin/oannes.php queue-run 25';
+        $inboxCommand = 'php oannes/bin/oannes.php inbox-run 25';
+        $cronBlock = '* * * * * cd ' . $installDir . ' && ' . $queueCommand . ' >/dev/null 2>&1' . "\n"
+            . '* * * * * cd ' . $installDir . ' && ' . $inboxCommand . ' >/dev/null 2>&1';
+        $installCronCommand = '(crontab -l 2>/dev/null | grep -v "oannes/bin/oannes.php"; printf "%s\n" ' . escapeshellarg($cronBlock) . ') | crontab -';
+        $updatesHelp = $updateMode === 'cron'
+            ? '<div class="cron-help"><p class="meta">Comandos:</p><pre><code>' . Html::escape($queueCommand . "\n" . $inboxCommand) . '</code></pre>'
+                . '<p class="meta">crontab recomendado para esta instalación, ejecutado cada minuto:</p><pre><code>' . Html::escape($cronBlock) . '</code></pre>'
+                . '<p class="meta">Comando para guardar el crontab:</p><pre><code>' . Html::escape($installCronCommand) . '</code></pre></div>'
+            : '<p class="meta">Este modo procesa pequeños lotes de recepción y envíos cuando hay visitas. Es más lento, pero no requiere configurar cron.</p>';
+        $updatesHtml = '<form method="post" action="?route=instance-admin/settings" class="instance-form">'
+            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+            . '<label class="check-row"><input name="update_mode" type="radio" value="activity"' . ($updateMode === 'activity' ? ' checked' : '') . '/><span>Actualización al detectarse actividad (lenta)</span></label>'
+            . '<label class="check-row"><input name="update_mode" type="radio" value="cron"' . ($updateMode === 'cron' ? ' checked' : '') . '/><span>Usar cron</span></label>'
+            . $updatesHelp
+            . '<button type="submit">Guardar actualizaciones</button>'
             . '</form>';
         $settingsHtml = '<form method="post" action="?route=instance-admin/settings" enctype="multipart/form-data">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
@@ -132,6 +152,7 @@ final class AdminRenderer
 
         return $this->renderer->page('Panel de administración', $messageHtml . $errorHtml
             . $this->panelBox('Instancia', $instanceHtml)
+            . $this->panelBox('Actualizaciones', $updatesHtml, $openBox === 'updates')
             . $this->panelBox('Imágenes de instancia', $settingsHtml)
             . $this->panelBox('Avisos de bloqueo', $noticesHtml)
             . $this->panelBox('Servidores bloqueados', $serversHtml)

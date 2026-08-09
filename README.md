@@ -105,7 +105,12 @@ Abre la web en el navegador. Si no existe ningun usuario local, Uanna mostrara l
 
 ## Actualizacion de colas
 
-Uanna procesa recepcion y envios de forma oportunista durante las visitas web normales. Cada peticion puede ejecutar un lote pequeno de inbox y entregas, con bloqueo de concurrencia y enfriamiento para no saturar la carga.
+La recepcion y los envios ActivityPub se configuran desde el panel de administracion, en la caja `Actualizaciones`.
+
+Hay dos modos:
+
+- `Actualizacion al detectarse actividad (lenta)`: Uanna procesa recepcion y envios de forma oportunista durante las visitas web normales. Cada peticion puede ejecutar un lote pequeno de inbox y entregas, con bloqueo de concurrencia y enfriamiento para no saturar la carga. No requiere cron, pero puede tardar mas si la instancia tiene poca actividad web.
+- `Usar cron`: Uanna no procesa colas durante las visitas. El administrador debe programar los comandos de cola en el crontab del servidor. Es el modo recomendado para instancias con mas trafico federado o para que todo avance aunque nadie visite la web durante horas.
 
 Los limites se ajustan en `oannes/config/oannes.php`:
 
@@ -116,19 +121,21 @@ Los limites se ajustan en `oannes/config/oannes.php`:
 'opportunistic_delivery_limit' => 2,
 ```
 
-Para instancias con mucho trafico federado, o si quieres que todo avance aunque nadie visite la web durante horas, puedes mantener cron como apoyo:
+Si eliges `Usar cron`, el panel calcula la ruta de la instalacion y muestra los comandos exactos para esa instancia. Los comandos base son:
 
 ```sh
 php oannes/bin/oannes.php queue-run 25
 php oannes/bin/oannes.php inbox-run 25
 ```
 
-Ejemplo:
+Tambien muestra el bloque de `crontab` recomendado, sustituyendo `/ruta/a/uanna` por la ruta real. La recomendacion por defecto es ejecutar recepcion y envios cada minuto:
 
 ```cron
 * * * * * cd /ruta/a/uanna && php oannes/bin/oannes.php queue-run 25 >/dev/null 2>&1
 * * * * * cd /ruta/a/uanna && php oannes/bin/oannes.php inbox-run 25 >/dev/null 2>&1
 ```
+
+El panel incluye ademas un comando para guardar esas lineas en el crontab del usuario actual.
 
 ## Comandos utiles
 

@@ -12,6 +12,11 @@ final class OpportunisticMaintenance
 
     public function run(string $scope = 'web'): array
     {
+        $settings = (new InstanceSettings($this->store, $this->config))->all();
+        if (($settings['update_mode'] ?? 'activity') === 'cron') {
+            return ['ran' => false, 'reason' => 'cron_mode'];
+        }
+
         if (!(bool)($this->config['opportunistic_workers_enabled'] ?? true)) {
             return ['ran' => false, 'reason' => 'disabled'];
         }

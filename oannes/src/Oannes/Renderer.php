@@ -294,13 +294,18 @@ final class Renderer
 
         $csrf = Html::escape((string)($actions['csrf'] ?? ''));
         $encodedId = Html::escape($id);
+        $uid = (string)($actions['uid'] ?? '');
+        $liked = $uid !== '' && $this->interactions->hasLocalReaction($uid, $id, 'Like');
+        $boosted = $uid !== '' && $this->interactions->hasLocalReaction($uid, $id, 'Announce');
+        $likeLabel = $liked ? 'Quitar fav' : 'Favoritear';
+        $boostLabel = $boosted ? 'Quitar impulso' : 'Impulsar';
 
         return '<footer class="post-actions">'
             . '<form method="post" action="?route=admin/react">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
-            . '<button type="submit" name="type" value="Like">Favoritear</button>'
-            . '<button type="submit" name="type" value="Announce">Impulsar</button>'
+            . '<button type="submit" name="type" value="Like">' . $likeLabel . '</button>'
+            . '<button type="submit" name="type" value="Announce">' . $boostLabel . '</button>'
             . '</form>'
             . $ownActions
             . '<div class="post-stats">' . $stats . '</div>'
