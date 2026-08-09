@@ -2,7 +2,7 @@
 
 # Uanna
 
-Uanna es un servidor de micro-blogging para comunidades pequenas y cerradas dentro del Fediverso. Esta pensado para grupos que prefieren una herramienta sencilla, auditable y facil de mantener antes que una plataforma grande con muchas dependencias.
+Uanna es un servidor de micro-blogging para comunidades por invitacion dentro del Fediverso. Esta pensado para grupos menores de 80 personas que prefieren una herramienta sencilla, auditable y facil de mantener antes que una plataforma grande con muchas dependencias.
 
 Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni ningun otro motor de base de datos.
 
@@ -12,14 +12,17 @@ Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni 
 - Timeline personal para usuarios autenticados.
 - Portada publica con presentacion editable de la instancia.
 - Perfiles publicos en rutas tipo `/@usuario`.
-- Favoritos e impulsos, con avatares enlazados a los perfiles.
+- Perfiles internos para actores federados cacheados, manteniendo enlace al perfil original.
+- Favoritos e impulsos, con avatares enlazados a los perfiles y acciones reversibles.
 - Arboles de respuestas basados en `inReplyTo`, sin confundir enlaces con respuestas.
-- Menciones `@usuario@servidor` con enlaces y avisos.
+- Menciones `@usuario` y `@usuario@servidor` con enlaces y avisos.
 - Adjuntos de imagen con texto alternativo.
 - Edicion y borrado de publicaciones propias con envio de actividades ActivityPub.
 - Panel de usuario con perfil, notificaciones, seguidores, seguidos, busqueda y mensajes privados.
-- Panel de administracion para configurar imagenes de instancia, usuarios y bloqueos.
-- Moderacion para altas, seguimientos, bloqueos de actores y servidores.
+- Notificaciones con contador de no leidas y pendientes, enlaces a perfiles originales y publicaciones afectadas.
+- Panel de administracion para configurar imagenes, nombre, presentacion, usuarios, actualizaciones y bloqueos.
+- Moderacion para altas, seguimientos, publicaciones pendientes, bloqueos de actores y servidores.
+- Actualizacion de recepcion y envios por cron o al detectarse actividad, sin saturar visitas normales.
 - Importacion y herramientas de diagnostico para migraciones desde snac.
 - Almacenamiento atomico en archivos para reducir corrupcion ante cortes o fallos.
 
