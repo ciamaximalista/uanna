@@ -473,7 +473,7 @@ final class Router
             return;
         }
 
-        header('Location: ?route=admin');
+        header('Location: ' . $this->homeLocation());
     }
 
     private function setup(string $method): void
@@ -510,7 +510,13 @@ final class Router
             return;
         }
 
-        header('Location: ?route=admin');
+        header('Location: ' . $this->homeLocation());
+    }
+
+    private function homeLocation(): string
+    {
+        $path = (string)($this->config['public_path'] ?? '');
+        return $path === '' ? '/' : $path;
     }
 
     private function adminLogout(string $method): void
