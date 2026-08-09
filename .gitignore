@@ -24,6 +24,28 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Android/mobile app experiments. Do not publish these until explicitly decided.
+/android/
+/mobile/
+/apps/android/
+/apps/mobile/
+/uanna-android/
+/maximalismo-android/
+*.apk
+*.aab
+*.apks
+*.idsig
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+*.xcarchive
+local.properties
+.gradle/
+gradle-app.setting
+build/
+captures/
+
 # Legacy snac/maximalismo.red data that must not be published with Uanna.
 /badlogin/
 /failure/
