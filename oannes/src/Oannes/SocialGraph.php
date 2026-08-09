@@ -41,6 +41,17 @@ final class SocialGraph
         return false;
     }
 
+    public function isFollower(string $uid, string $actorId): bool
+    {
+        foreach ($this->followers($uid) as $actor) {
+            if (in_array($actorId, ActivityPub::aliases($actor), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function removeFollowing(string $uid, string $actorId): void
     {
         foreach ($this->following($uid) as $actor) {

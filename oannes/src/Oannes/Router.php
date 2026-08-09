@@ -237,6 +237,7 @@ final class Router
     {
         $id = $_GET['id'] ?? null;
         $uid = $_GET['user'] ?? null;
+        $actor = $_GET['actor'] ?? null;
 
         if (is_string($id) && $id !== '') {
             $format = $_GET['format'] ?? '';
@@ -263,12 +264,17 @@ final class Router
                 return;
             }
 
-            echo $this->renderer->objectPage($id);
+            echo $this->renderer->objectPage($id, $this->currentActions());
             return;
         }
 
         if (is_string($uid) && $uid !== '') {
-            echo $this->renderer->userPage($uid);
+            echo $this->renderer->userPage($uid, $this->currentActions());
+            return;
+        }
+
+        if (is_string($actor) && $actor !== '') {
+            echo $this->renderer->actorPage($actor, $this->currentActions());
             return;
         }
 
@@ -380,7 +386,22 @@ final class Router
             return;
         }
 
-        echo $this->renderer->userPage($uid);
+        echo $this->renderer->userPage($uid, $this->currentActions());
+    }
+
+    private function currentActions(): ?array
+    {
+        $auth = $this->auth ?? new Auth($this->store);
+        $uid = $auth->currentUser();
+
+        if ($uid === null) {
+            return null;
+        }
+
+        return [
+            'uid' => $uid,
+            'csrf' => $auth->csrfToken(),
+        ];
     }
 
     private function outbox(string $uid): void
@@ -1369,6 +1390,11 @@ final class Router
 
     private function adminDashboard(string $uid, Auth $auth, ?string $message = null, ?string $error = null): string
     {
+        $focus = $_GET['focus'] ?? '';
+        if ($focus === 'notifications') {
+            $this->markNotificationsSeen($uid);
+        }
+
         [$pendingFollows, $pendingCreates] = $this->pendingModeration($uid);
         $timelineSearchQuery = $_GET['timeline_q'] ?? '';
         $timelineSearchQuery = is_string($timelineSearchQuery) ? trim($timelineSearchQuery) : '';
@@ -1399,6 +1425,13 @@ final class Router
             $timelineSearchQuery,
             $timelineSearchResults,
         );
+    }
+
+    private function markNotificationsSeen(string $uid): void
+    {
+        $this->store->writeJson($this->store->dataDir() . '/state/users/' . rawurlencode($uid) . '/notifications.json', [
+            'seen_at' => gmdate('c'),
+        ]);
     }
 
     private function searchTimeline(array $timeline, string $query): array
@@ -1551,6 +1584,7 @@ final class Router
 
             $type = (string)($record['type'] ?? 'Notificación');
             $items[] = [
+                'type' => $type,
                 'label' => match ($type) {
                     'Like' => 'Favorito',
                     'Announce' => 'Impulso',
@@ -1561,6 +1595,7 @@ final class Router
                     default => $type,
                 },
                 'actor' => $actor,
+                'objid' => (string)($record['objid'] ?? ''),
                 'date' => (string)($record['date'] ?? ''),
             ];
         }

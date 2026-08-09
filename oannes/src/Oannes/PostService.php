@@ -212,16 +212,18 @@ final class PostService
 
     private function mentionsForContent(string $content, string $authorUid): array
     {
-        preg_match_all('/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])/', $content, $matches, PREG_SET_ORDER);
+        $localHost = strtolower((string)$this->config['host']);
+        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_-]{0,63})(?![\w@.-])/u';
+        preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
         $mentions = [];
 
         foreach ($matches as $match) {
             $name = $match[0];
-            $username = $match[1];
-            $host = strtolower($match[2]);
+            $username = isset($match[3]) && $match[3] !== '' ? $match[3] : $match[1];
+            $host = isset($match[3]) && $match[3] !== '' ? $localHost : strtolower($match[2]);
             $mention = $this->resolveMention($username, $host, $name);
 
-            if ($mention === null || $mention['local_uid'] === $authorUid) {
+            if ($mention === null) {
                 continue;
             }
 
@@ -276,7 +278,7 @@ final class PostService
             $byName[(string)$mention['name']] = $mention;
         }
 
-        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|https?:\/\/[^\s<>"\']+/u';
+        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_-]{0,63})(?![\w@.-])|https?:\/\/[^\s<>"\']+/u';
         $html = '';
         $offset = 0;
 

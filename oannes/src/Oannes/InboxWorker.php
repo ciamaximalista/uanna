@@ -89,6 +89,10 @@ final class InboxWorker
         $type = ActivityPub::objectType($activity);
 
         if ($type === 'Follow') {
+            if ($this->acceptExistingFollower($localUid, $actorId, $activity)) {
+                return 'follows';
+            }
+
             $this->writeReview('follows', $record, $activity);
             return 'follows';
         }
@@ -104,6 +108,68 @@ final class InboxWorker
 
         $this->writeReview('other', $record, $activity);
         return 'other';
+    }
+
+    private function acceptExistingFollower(string $localUid, string $actorId, array $activity): bool
+    {
+        if ($localUid === '' || $actorId === '' || !(new SocialGraph($this->store))->isFollower($localUid, $actorId)) {
+            return false;
+        }
+
+        $actor = (new ActorRepository($this->store))->findById($actorId);
+        if ($actor === null) {
+            return false;
+        }
+
+        $inbox = (new SocialGraph($this->store))->inboxForActor($actor);
+        if ($inbox === null) {
+            return true;
+        }
+
+        $localActor = $this->followObjectActor($activity);
+        if ($localActor === '') {
+            return true;
+        }
+
+        $this->queue->enqueue('deliver', [
+            'actor' => $localActor,
+            'inbox' => $inbox,
+            'activity' => $this->followResponseActivity($localActor, $activity),
+        ]);
+
+        return true;
+    }
+
+    private function followObjectActor(array $follow): string
+    {
+        $object = $follow['object'] ?? null;
+
+        if (is_string($object) && $object !== '') {
+            return $object;
+        }
+
+        if (is_array($object)) {
+            return ActivityPub::objectId($object) ?? '';
+        }
+
+        return '';
+    }
+
+    private function followResponseActivity(string $localActor, array $follow): array
+    {
+        $activityId = ActivityPub::objectId($follow) ?? Id::digest(Json::encode($follow));
+
+        return [
+            '@context' => 'https://www.w3.org/ns/activitystreams',
+            'id' => $localActor . '/activities/accept/' . Id::digest($activityId),
+            'type' => 'Accept',
+            'actor' => $localActor,
+            'object' => $follow,
+            'published' => gmdate('c'),
+            'to' => [
+                ActivityPub::attributedTo($follow) ?? '',
+            ],
+        ];
     }
 
     private function acceptCreateFromFollowed(string $localUid, string $actorId, array $activity): bool

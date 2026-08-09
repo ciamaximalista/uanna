@@ -135,7 +135,7 @@ final class FileStore
         fflush($handle);
         fclose($handle);
 
-        if (!rename($tmp, $path)) {
+        if (!@rename($tmp, $path)) {
             @unlink($tmp);
             throw new RuntimeException("Cannot move {$tmp} to {$path}");
         }

@@ -21,12 +21,21 @@ final class ModerationService
         $dir = $this->basePath($uid, $kind);
 
         foreach (glob($dir . '/*.json') ?: [] as $file) {
+            $caseId = basename($file, '.json');
+            if ($this->caseDecision($uid, $kind, $caseId) !== null) {
+                continue;
+            }
+
             $case = $this->store->readJson($file);
             if (($case['status'] ?? null) !== 'pending') {
                 continue;
             }
 
-            $case['case_id'] = basename($file, '.json');
+            if ($kind === 'follows' && $this->alreadyFollowerCase($uid, $case)) {
+                continue;
+            }
+
+            $case['case_id'] = $caseId;
             $case['case_path'] = $file;
             $cases[] = $case;
         }
@@ -37,6 +46,22 @@ final class ModerationService
         ));
 
         return array_slice($cases, 0, $limit);
+    }
+
+    private function alreadyFollowerCase(string $uid, array $case): bool
+    {
+        $record = $case['record'] ?? null;
+        $activity = is_array($record) ? ($record['activity'] ?? null) : null;
+
+        if (!is_array($activity)) {
+            return false;
+        }
+
+        try {
+            return $this->graph->isFollower($uid, $this->actorFromActivity($activity));
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     public function approveFollow(string $uid, string $caseId, string $adminUid): array
@@ -89,7 +114,7 @@ final class ModerationService
         $case['decided_at'] = gmdate('c');
         $case['decided_by'] = $adminUid;
         $case['stored_object_id'] = $objectId;
-        $this->store->writeJson($this->casePath($uid, 'creates', $caseId), $case);
+        $this->markCaseDecided($uid, 'creates', $caseId, $case);
 
         return [
             'ok' => true,
@@ -111,7 +136,7 @@ final class ModerationService
         $case['status'] = 'rejected';
         $case['decided_at'] = gmdate('c');
         $case['decided_by'] = $adminUid;
-        $this->store->writeJson($this->casePath($uid, 'creates', $caseId), $case);
+        $this->markCaseDecided($uid, 'creates', $caseId, $case);
 
         return [
             'ok' => true,
@@ -137,6 +162,15 @@ final class ModerationService
             throw new RuntimeException('Follow actor is not available locally');
         }
 
+        if ($approve && $this->graph->isFollower($uid, $remoteActorId)) {
+            return [
+                'ok' => true,
+                'status' => 'approved',
+                'remote_actor' => $remoteActorId,
+                'already_follower' => true,
+            ];
+        }
+
         $inbox = $this->graph->inboxForActor($remoteActor);
         if ($inbox === null) {
             throw new RuntimeException('Follow actor has no inbox');
@@ -157,7 +191,7 @@ final class ModerationService
         $case['decided_at'] = gmdate('c');
         $case['decided_by'] = $adminUid;
         $case['response_activity'] = $response;
-        $this->store->writeJson($this->casePath($uid, 'follows', $caseId), $case);
+        $this->markCaseDecided($uid, 'follows', $caseId, $case);
 
         return [
             'ok' => true,
@@ -170,6 +204,10 @@ final class ModerationService
     {
         if (!preg_match('/^[a-f0-9]{64}$/', $caseId)) {
             throw new RuntimeException('Invalid moderation case id');
+        }
+
+        if ($this->caseDecision($uid, $kind, $caseId) !== null) {
+            throw new RuntimeException('Moderation case is not pending');
         }
 
         $path = $this->casePath($uid, $kind, $caseId);
@@ -185,6 +223,41 @@ final class ModerationService
         }
 
         return $case;
+    }
+
+    private function markCaseDecided(string $uid, string $kind, string $caseId, array $case): void
+    {
+        $decision = [
+            'status' => (string)($case['status'] ?? 'decided'),
+            'decided_at' => (string)($case['decided_at'] ?? gmdate('c')),
+            'decided_by' => (string)($case['decided_by'] ?? ''),
+            'case_id' => $caseId,
+            'kind' => $kind,
+            'stored_object_id' => (string)($case['stored_object_id'] ?? ''),
+        ];
+
+        $this->store->writeJson($this->decisionPath($uid, $kind, $caseId), $decision);
+
+        try {
+            $this->store->writeJson($this->casePath($uid, $kind, $caseId), $case);
+        } catch (\Throwable) {
+            // Older migrated moderation files can be owned by a different web user.
+            // The sidecar decision above is authoritative for Uanna.
+        }
+    }
+
+    private function caseDecision(string $uid, string $kind, string $caseId): ?array
+    {
+        $path = $this->decisionPath($uid, $kind, $caseId);
+        if (!is_file($path)) {
+            return null;
+        }
+
+        try {
+            return $this->store->readJson($path);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function actorFromFollow(array $activity): string
@@ -236,5 +309,10 @@ final class ModerationService
     private function casePath(string $uid, string $kind, string $caseId): string
     {
         return $this->basePath($uid, $kind) . '/' . $caseId . '.json';
+    }
+
+    private function decisionPath(string $uid, string $kind, string $caseId): string
+    {
+        return $this->store->dataDir() . '/state/moderation/inbox/' . rawurlencode($uid) . '/' . $kind . '/' . $caseId . '.json';
     }
 }

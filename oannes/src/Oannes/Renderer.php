@@ -38,12 +38,12 @@ final class Renderer
         $pageTitle = Html::escape($pageTitle);
 
         $home = Html::escape($this->publicUrl());
-        $admin = Html::escape($this->publicUrl(['route' => 'admin']));
         $style = Html::escape($this->assetUrl('style.css'));
         $cropScript = Html::escape($this->assetUrl('profile-crop.js'));
         $favicon = Html::escape($settings->faviconPath());
         $brand = $this->topbarBrand($home, $name);
         $composer = $this->composerControls();
+        $panelLink = $this->panelNavLink();
         $adminLink = $this->adminNavLink();
         $footer = $this->siteFooter($name);
 
@@ -56,8 +56,115 @@ final class Renderer
             . "<link rel=\"stylesheet\" href=\"{$style}\"/>"
             . "<script defer src=\"{$cropScript}\"></script>"
             . "</head><body><header class=\"topbar\">{$brand}"
-            . "<nav class=\"navlinks\"><a href=\"{$home}\">Inicio</a><a href=\"{$admin}\">Panel</a>{$adminLink}{$composer['button']}</nav></header>"
+            . "<nav class=\"navlinks\"><a href=\"{$home}\">Inicio</a>{$panelLink}{$adminLink}{$composer['button']}</nav></header>"
             . "<main>{$body}</main>{$footer}{$composer['modal']}</body></html>";
+    }
+
+    private function panelNavLink(): string
+    {
+        $href = Html::escape($this->publicUrl(['route' => 'admin']));
+        $auth = new Auth(new FileStore($this->config['data_dir']));
+        $uid = $auth->currentUser();
+
+        if ($uid === null) {
+            return '<a href="' . $href . '">Panel</a>';
+        }
+
+        $count = $this->panelAttentionCount($uid);
+        if ($count <= 0) {
+            return '<a href="' . $href . '">Panel</a>';
+        }
+
+        $target = Html::escape($this->publicUrl(['route' => 'admin', 'focus' => 'notifications']) . '#notifications');
+        return '<a class="panel-link has-badge" href="' . $target . '">Panel <span class="nav-badge">' . Html::escape((string)min($count, 99)) . '</span></a>';
+    }
+
+    private function panelAttentionCount(string $uid): int
+    {
+        return $this->unreadNotificationCount($uid) + $this->pendingReviewCount($uid);
+    }
+
+    private function unreadNotificationCount(string $uid): int
+    {
+        $seen = $this->notificationsSeenAt($uid);
+        $root = dirname((string)$this->config['data_dir'], 2);
+        $count = 0;
+
+        foreach (glob($root . '/user/' . $uid . '/notify/*.json') ?: [] as $file) {
+            try {
+                $record = Json::decodeFile($file);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            $date = (string)($record['date'] ?? $record['created_at'] ?? '');
+            if ($seen === '' || $date === '' || strcmp($date, $seen) > 0) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private function notificationsSeenAt(string $uid): string
+    {
+        $path = (string)$this->config['data_dir'] . '/state/users/' . rawurlencode($uid) . '/notifications.json';
+        if (!is_file($path)) {
+            return '';
+        }
+
+        try {
+            $record = Json::decodeFile($path);
+        } catch (\Throwable) {
+            return '';
+        }
+
+        $seen = $record['seen_at'] ?? '';
+        return is_string($seen) ? $seen : '';
+    }
+
+    private function pendingReviewCount(string $uid): int
+    {
+        $count = 0;
+        $graph = new SocialGraph(new FileStore($this->config['data_dir']));
+        foreach (['follows', 'creates'] as $kind) {
+            foreach (glob((string)$this->config['data_dir'] . '/moderation/inbox/' . rawurlencode($uid) . '/' . $kind . '/*.json') ?: [] as $file) {
+                $caseId = basename($file, '.json');
+                if (is_file((string)$this->config['data_dir'] . '/state/moderation/inbox/' . rawurlencode($uid) . '/' . $kind . '/' . $caseId . '.json')) {
+                    continue;
+                }
+
+                try {
+                    $case = Json::decodeFile($file);
+                } catch (\Throwable) {
+                    continue;
+                }
+
+                if (($case['status'] ?? null) !== 'pending') {
+                    continue;
+                }
+
+                if ($kind === 'follows' && $this->pendingFollowAlreadyFollower($uid, $case, $graph)) {
+                    continue;
+                }
+
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private function pendingFollowAlreadyFollower(string $uid, array $case, SocialGraph $graph): bool
+    {
+        $record = $case['record'] ?? null;
+        $activity = is_array($record) ? ($record['activity'] ?? null) : null;
+        if (!is_array($activity)) {
+            return false;
+        }
+
+        $actorId = ActivityPub::attributedTo($activity);
+        return $actorId !== null && $graph->isFollower($uid, $actorId);
     }
 
     private function siteFooter(string $name): string
@@ -158,7 +265,7 @@ final class Renderer
         return $this->page('', '<section class="timeline">' . $items . '</section>');
     }
 
-    public function userPage(string $uid): string
+    public function userPage(string $uid, ?array $actions = null): string
     {
         $localUsers = new LocalUsers(new FileStore($this->config['data_dir']), $this->config);
         $user = $localUsers->find($uid);
@@ -175,7 +282,7 @@ final class Renderer
         );
         $objects = $this->sortObjectsForProfile($this->publicObjects($objects));
 
-        $items = $this->profileTimeline($objects);
+        $items = $this->profileTimeline($objects, $actions);
 
         $name = Html::escape((string)($user['name'] ?? $uid));
         $bio = Html::escape((string)($user['bio'] ?? ''));
@@ -193,6 +300,47 @@ final class Renderer
             . '</section><section class="timeline">' . $items . '</section>';
 
         return $this->page($name, $body);
+    }
+
+    public function actorPage(string $actorId, ?array $actions = null): string
+    {
+        $actorId = trim($actorId);
+        $actor = $actorId !== '' ? $this->actors->findById($actorId) : null;
+
+        if ($actorId === '' || $actor === null) {
+            http_response_code(404);
+            return $this->page('No encontrado', '<h1>No encontrado</h1>');
+        }
+
+        foreach ($this->users->all() as $uid => $_user) {
+            if (!is_string($uid)) {
+                continue;
+            }
+
+            if (in_array($actorId, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true)) {
+                return $this->userPage($uid, $actions);
+            }
+        }
+
+        $info = $this->actorInfo($actorId);
+        $objects = $this->sortObjectsForProfile($this->publicObjects($this->repo->byAnyActor(ActivityPub::aliases($actor), 240)));
+        $items = $this->profileTimeline($objects, $actions);
+        $name = Html::escape((string)$info['label']);
+        $handle = Html::escape($this->actorHandle($actor, $actorId));
+        $avatar = Html::escape((string)$info['avatar']);
+        $avatarHtml = $avatar !== ''
+            ? '<img class="avatar" src="' . $avatar . '" alt=""/>'
+            : '<span class="avatar avatar-fallback">' . Html::escape((string)$info['initial']) . '</span>';
+        $externalUrl = Html::escape((string)$info['url']);
+
+        $body = '<section class="profile hero-profile">'
+            . '<div class="profile-cover"></div>'
+            . '<div class="profile-main"><a href="' . $externalUrl . '">' . $avatarHtml . '</a><div><h1>' . $name . '</h1>'
+            . ($handle !== '' ? '<p class="meta">' . $handle . '</p>' : '')
+            . '<p class="meta"><a href="' . $externalUrl . '">Perfil original</a></p></div></div>'
+            . '</section><section class="timeline">' . $items . '</section>';
+
+        return $this->page((string)$info['label'], $body);
     }
 
     private function sortObjectsForProfile(array $objects): array
@@ -219,7 +367,7 @@ final class Renderer
         return array_slice($objects, 0, 80);
     }
 
-    private function profileTimeline(array $objects): string
+    private function profileTimeline(array $objects, ?array $actions): string
     {
         $html = '';
         $renderedRoots = [];
@@ -247,6 +395,7 @@ final class Renderer
 
                 $html .= $this->objectCard($node['object'], false, [
                     'children' => $node['children'] ?? [],
+                    'actions' => $actions,
                 ]);
             }
         }
@@ -309,7 +458,7 @@ final class Renderer
         }
     }
 
-    public function objectPage(string $id): string
+    public function objectPage(string $id, ?array $actions = null): string
     {
         $object = $this->repo->findByIdOrAlias($id);
 
@@ -321,6 +470,7 @@ final class Renderer
         $title = $this->titleFor($object);
         $body = $this->objectCard($object, false, [
             'children' => $this->replyTree(ActivityPub::objectId($object) ?? $id),
+            'actions' => $actions,
         ]);
 
         return $this->page($title, $body);
@@ -367,6 +517,8 @@ final class Renderer
             ? '<img class="post-avatar" src="' . $avatar . '" alt=""/>'
             : '<span class="post-avatar avatar-fallback">' . Html::escape($actorInfo['initial']) . '</span>';
         $avatarHtml = '<a class="post-avatar-link" href="' . $actorProfileUrl . '" aria-label="' . Html::escape((string)$actorInfo['label']) . '">' . $avatarInner . '</a>';
+        $actorInternalUrl = Html::escape((string)($actorInfo['internal_url'] ?? $actorProfileUrl));
+        $actorNameHtml = '<a class="post-author-link" href="' . $actorInternalUrl . '"><strong>' . Html::escape($actorInfo['label']) . '</strong></a>';
         $childrenHtml = $this->childrenHtml($children, $actions);
         $ownActions = $this->ownPostActions($object, $actions);
         $actionHtml = $this->actionBar($id, $interactionActors, $actions, $ownActions);
@@ -377,7 +529,7 @@ final class Renderer
         return '<article class="' . $class . '"' . $anchorAttr . '>'
             . $boostHtml
             . '<header class="object-head">' . $avatarHtml . '<div>'
-            . '<p class="meta post-meta"><strong>' . Html::escape($actorInfo['label']) . '</strong><br/>'
+            . '<p class="meta post-meta">' . $actorNameHtml . '<br/>'
             . '<a href="' . Html::escape($url) . '"><time datetime="' . Html::escape($published) . '">' . Html::escape($publishedHuman) . '</time></a>' . $visibilityBadge . '</p></div></header>'
             . '<div class="content">' . $content . '</div>'
             . $actionHtml
@@ -783,6 +935,7 @@ final class Renderer
                     'avatar' => $this->users->avatarUrl($user),
                     'initial' => $this->initial((string)$uid),
                     'url' => $this->users->webUrl((string)$uid),
+                    'internal_url' => $this->users->webUrl((string)$uid),
                 ];
             }
         }
@@ -803,6 +956,7 @@ final class Renderer
             'avatar' => $avatar,
             'initial' => $this->initial($name !== '' ? $name : '?'),
             'url' => $this->actorUrl($actor, $actorId),
+            'internal_url' => $actorId !== '' ? $this->publicUrl(['actor' => $actorId]) : '#',
         ];
     }
 
@@ -834,6 +988,18 @@ final class Renderer
         }
 
         return $actorId !== '' ? $actorId : '#';
+    }
+
+    private function actorHandle(array $actor, string $actorId): string
+    {
+        $username = $actor['preferredUsername'] ?? null;
+        $host = parse_url($actorId, PHP_URL_HOST);
+
+        if (is_string($username) && $username !== '' && is_string($host) && $host !== '') {
+            return '@' . $username . '@' . $host;
+        }
+
+        return $actorId;
     }
 
     private function initial(string $text): string
@@ -889,7 +1055,7 @@ final class Renderer
 
     private function linkTextEntities(string $text): string
     {
-        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|https?:\/\/[^\s<>"\']+/u';
+        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_-]{0,63})(?![\w@.-])|https?:\/\/[^\s<>"\']+/u';
         $html = '';
         $offset = 0;
 
@@ -905,7 +1071,10 @@ final class Renderer
                 continue;
             }
 
-            $url = $this->mentionUrl($matches[1][$index][0], $matches[2][$index][0]);
+            $localUsername = $matches[3][$index][0] ?? '';
+            $url = $localUsername !== ''
+                ? $this->mentionUrl($localUsername, (string)$this->config['host'])
+                : $this->mentionUrl($matches[1][$index][0], $matches[2][$index][0]);
             $html .= $url !== null
                 ? '<a class="mention" href="' . Html::escape($url) . '">' . Html::escape($entity) . '</a>'
                 : Html::escape($entity);

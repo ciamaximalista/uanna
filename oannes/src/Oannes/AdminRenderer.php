@@ -182,7 +182,7 @@ final class AdminRenderer
         $messageHtml = $message !== null ? '<p class="notice">' . Html::escape($message) . '</p>' : '';
         $errorHtml = $error !== null ? '<p class="error">' . Html::escape($error) . '</p>' : '';
         $profileHtml = $this->profileForm($uid, $profile ?? [], $csrf);
-        $notificationsHtml = $this->notifications($notifications, $pendingFollows, $csrf);
+        $notificationsHtml = $this->notifications($notifications, $pendingFollows, $pendingCreates, $csrf);
         $socialHtml = $this->socialColumns($uid, $csrf, $followers, $following, $socialStates);
         $privateHtml = $this->privateMessages($privateMessages, $csrf);
         $profileLink = $profileUrl !== ''
@@ -194,18 +194,21 @@ final class AdminRenderer
             . '<button type="submit">Salir</button>'
             . '</form>';
 
+        $focus = $_GET['focus'] ?? '';
+        $focus = is_string($focus) ? $focus : '';
+
         return $this->renderer->page('Panel de usuario', $messageHtml . $errorHtml
             . $this->panelBox('Perfil', '<div class="admin-actions">' . $profileLink . '</div>' . $profileHtml)
             . $this->panelBox('Buscar en timeline', $this->timelineSearch($timelineSearchQuery, $timelineSearchResults), $timelineSearchQuery !== '')
-            . $this->panelBox('Notificaciones', $notificationsHtml)
+            . $this->panelBox('Notificaciones', $notificationsHtml, $focus === 'notifications', 'notifications')
             . $this->panelBox('Mensajes privados', $privateHtml)
             . $this->panelBox('Red', $socialHtml)
             . '<div class="panel-bottom-actions">' . $logout . '</div>');
     }
 
-    private function panelBox(string $title, string $content, bool $open = false): string
+    private function panelBox(string $title, string $content, bool $open = false, string $id = ''): string
     {
-        return '<details class="object admin-section"' . ($open ? ' open' : '') . '>'
+        return '<details class="object admin-section"' . ($id !== '' ? ' id="' . Html::escape($id) . '"' : '') . ($open ? ' open' : '') . '>'
             . '<summary><span>' . Html::escape($title) . '</span></summary>'
             . '<div class="admin-section-body">' . $content . '</div>'
             . '</details>';
@@ -265,7 +268,7 @@ final class AdminRenderer
             . '</section>';
     }
 
-    private function notifications(array $notifications, array $pendingFollows, string $csrf): string
+    private function notifications(array $notifications, array $pendingFollows, array $pendingCreates, string $csrf): string
     {
         $html = '';
 
@@ -274,10 +277,32 @@ final class AdminRenderer
             $activity = is_array($record['activity'] ?? null) ? $record['activity'] : [];
             $actor = $activity['actor'] ?? $record['actor'] ?? 'actor desconocido';
             $caseId = (string)($case['case_id'] ?? '');
+            $actorHtml = is_string($actor) ? $this->actorLink($actor) : 'actor desconocido';
 
             $html .= '<article class="notification follow-request">'
-                . '<div><strong>Nuevo seguidor</strong><p class="meta">' . Html::escape(is_string($actor) ? $actor : 'actor desconocido') . '</p></div>'
+                . '<div><strong>Nuevo seguidor</strong><p class="meta">' . $actorHtml . '</p></div>'
                 . '<form method="post" action="?route=admin/moderation/follow" class="actions">'
+                . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+                . '<input type="hidden" name="case" value="' . Html::escape($caseId) . '"/>'
+                . '<button name="decision" value="approve" type="submit">Aprobar</button>'
+                . '<button name="decision" value="reject" type="submit">Descartar</button>'
+                . '</form>'
+                . '</article>';
+        }
+
+        foreach ($pendingCreates as $case) {
+            $record = is_array($case['record'] ?? null) ? $case['record'] : [];
+            $activity = is_array($record['activity'] ?? null) ? $record['activity'] : [];
+            $actor = $activity['actor'] ?? $record['actor'] ?? 'actor desconocido';
+            $object = is_array($activity['object'] ?? null) ? $activity['object'] : [];
+            $objectId = (string)($object['id'] ?? '');
+            $caseId = (string)($case['case_id'] ?? '');
+
+            $html .= '<article class="notification follow-request">'
+                . '<div><strong>Publicación pendiente</strong><p class="meta">' . Html::escape(is_string($actor) ? $actor : 'actor desconocido') . '</p>'
+                . ($objectId !== '' ? '<p class="meta">' . Html::escape($objectId) . '</p>' : '')
+                . '</div>'
+                . '<form method="post" action="?route=admin/moderation/create" class="actions">'
                 . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
                 . '<input type="hidden" name="case" value="' . Html::escape($caseId) . '"/>'
                 . '<button name="decision" value="approve" type="submit">Aprobar</button>'
@@ -288,14 +313,46 @@ final class AdminRenderer
 
         foreach ($notifications as $notification) {
             $date = (string)($notification['date'] ?? '');
+            $type = (string)($notification['type'] ?? '');
+            $actor = (string)($notification['actor'] ?? '');
+            $objid = (string)($notification['objid'] ?? '');
+            $body = $this->notificationBody($type, $actor, $objid);
+
             $html .= '<article class="notification">'
                 . '<strong>' . Html::escape((string)($notification['label'] ?? 'Notificación')) . '</strong>'
-                . '<p class="meta">' . Html::escape((string)($notification['actor'] ?? '')) . '</p>'
+                . $body
                 . '<p class="meta"><time datetime="' . Html::escape($date) . '">' . Html::escape(DateFormat::human($date)) . '</time></p>'
                 . '</article>';
         }
 
         return $html !== '' ? '<div class="notifications">' . $html . '</div>' : '<p class="muted">Sin notificaciones recientes.</p>';
+    }
+
+    private function notificationBody(string $type, string $actor, string $objid): string
+    {
+        if (in_array($type, ['Like', 'Announce'], true) && $actor !== '' && $objid !== '') {
+            $verb = $type === 'Like' ? 'favoriteó' : 'impulsó';
+            return '<p class="meta">' . $this->actorLink($actor) . ' ' . $verb . ' <a href="' . Html::escape($objid) . '">' . Html::escape($objid) . '</a></p>';
+        }
+
+        if ($type === 'Follow' && $actor !== '') {
+            return '<p class="meta">' . $this->actorLink($actor) . '</p>';
+        }
+
+        if ($type === 'Webmention' && $actor !== '') {
+            return '<p class="meta"><a href="' . Html::escape($actor) . '">' . Html::escape($actor) . '</a></p>';
+        }
+
+        return '<p class="meta">' . Html::escape($actor) . '</p>';
+    }
+
+    private function actorLink(string $actorId): string
+    {
+        $info = $this->renderer->actorInfo($actorId);
+        $label = (string)($info['label'] ?? $actorId);
+        $url = (string)($info['url'] ?? $actorId);
+
+        return '<a href="' . Html::escape($url) . '">' . Html::escape($label !== '' ? $label : $actorId) . '</a>';
     }
 
     private function socialColumns(string $uid, string $csrf, array $followers, array $following, array $socialStates): string
