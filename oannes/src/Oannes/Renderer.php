@@ -44,6 +44,7 @@ final class Renderer
         $brand = $this->topbarBrand($home, $name);
         $composer = $this->composerControls();
         $adminLink = $this->adminNavLink();
+        $footer = $this->siteFooter($name);
 
         return "<!doctype html>\n"
             . "<html lang=\"es\"><head><meta charset=\"utf-8\"/>"
@@ -55,7 +56,16 @@ final class Renderer
             . "<script defer src=\"{$cropScript}\"></script>"
             . "</head><body><header class=\"topbar\">{$brand}"
             . "<nav class=\"navlinks\"><a href=\"{$home}\">Inicio</a><a href=\"{$admin}\">Panel</a>{$adminLink}{$composer['button']}</nav></header>"
-            . "<main>{$body}</main>{$composer['modal']}</body></html>";
+            . "<main>{$body}</main>{$footer}{$composer['modal']}</body></html>";
+    }
+
+    private function siteFooter(string $name): string
+    {
+        return '<footer class="site-footer"><p>' . $name
+            . ' se hace con <a href="https://ruralnext.org/uanna" target="_blank" rel="noopener">Uanna</a>, '
+            . 'software libre con licencia <a href="https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12" target="_blank" rel="noopener">EUPL 1.2</a> '
+            . 'desarrollado por <a href="https://maximalista.coop" target="_blank" rel="noopener">Compañía Maximalista S.Coop<img class="site-footer-logo" src="' . Html::escape($this->assetUrl('maximalista.png')) . '" alt=""/></a> '
+            . 'para <a href="https://ruralnext.org" target="_blank" rel="noopener">RuralNEXT</a>.</p></footer>';
     }
 
     private function topbarBrand(string $home, string $fallbackName): string
