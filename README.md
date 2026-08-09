@@ -1,3 +1,5 @@
+![Uanna](uanna-banner.png)
+
 # Uanna
 
 Uanna es un servidor de micro-blogging para comunidades pequenas y cerradas dentro del Fediverso. Esta pensado para grupos que prefieren una herramienta sencilla, auditable y facil de mantener antes que una plataforma grande con muchas dependencias.
