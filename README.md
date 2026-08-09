@@ -156,6 +156,28 @@ php oannes/bin/oannes.php rebuild-index
 php oannes/bin/oannes.php validate-threads
 ```
 
+### Identidad de actores al migrar desde snac
+
+Las instalaciones nuevas de Uanna usan actores en `/u/usuario`:
+
+```php
+'local_actor_path' => '/u',
+'legacy_actor_paths' => [],
+```
+
+Si migras una instancia snac que ya federaba con actores en la raiz, por ejemplo `https://dominio.org/david`, conviene conservar esa identidad como primaria. De lo contrario, otros servidores pueden seguir al actor antiguo y no incorporar bien las publicaciones nuevas aunque reciban las entregas.
+
+En ese caso configura la instancia asi antes de publicar contenido nuevo:
+
+```php
+'local_actor_path' => '',
+'legacy_actor_paths' => [
+    '/u/%s',
+],
+```
+
+Con esa configuracion, el actor principal seguira siendo `https://dominio.org/usuario` y la ruta `/u/usuario` quedara como alias compatible. Usa esta opcion solo para migraciones que necesiten preservar identidades antiguas; para instalaciones nuevas es mejor mantener `/u/usuario`.
+
 ## Datos y copias de seguridad
 
 Los datos vivos de una instancia estan en `oannes/data` y no forman parte del repositorio. Haz copias de seguridad de ese directorio y de `oannes/public/assets`.

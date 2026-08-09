@@ -66,6 +66,26 @@ final class Router
             return;
         }
 
+        if (preg_match('#^legacy-user/([^/]+)/outbox$#', $route, $match)) {
+            $this->outbox($match[1]);
+            return;
+        }
+
+        if (preg_match('#^legacy-user/([^/]+)/(followers|following)$#', $route, $match)) {
+            $this->socialCollection($match[1], $match[2]);
+            return;
+        }
+
+        if (preg_match('#^legacy-user/([^/]+)/inbox$#', $route, $match)) {
+            if ($method !== 'POST') {
+                Http::methodNotAllowed();
+                return;
+            }
+
+            $this->inbox($match[1], $method);
+            return;
+        }
+
         if (preg_match('#^u/([^/]+)/outbox$#', $route, $match)) {
             $this->outbox($match[1]);
             return;
@@ -190,6 +210,10 @@ final class Router
 
         if (preg_match('#^u/[a-zA-Z0-9_-]+(?:/(?:outbox|inbox|followers|following))?$#', $path)) {
             return $path;
+        }
+
+        if (preg_match('#^([a-zA-Z0-9_-]{1,64})/(outbox|inbox|followers|following)$#', $path, $match) && $this->users->find($match[1]) !== null) {
+            return 'legacy-user/' . $match[1] . '/' . $match[2];
         }
 
         if (preg_match('/^@([a-zA-Z0-9_-]{1,64})$/', $path, $match) && $this->users->find($match[1]) !== null) {
@@ -1305,14 +1329,20 @@ final class Router
 
     private function isLocalActorId(string $actorId): bool
     {
+        return $this->localUidForActorId($actorId) !== null;
+    }
+
+    private function localUidForActorId(string $actorId): ?string
+    {
         foreach ($this->users->all() as $uid => $_user) {
-            $ids = array_merge([$this->users->actorId((string)$uid)], $this->users->legacyActorIds((string)$uid));
+            $uid = (string)$uid;
+            $ids = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
             if (in_array($actorId, $ids, true)) {
-                return true;
+                return $uid;
             }
         }
 
-        return false;
+        return null;
     }
 
     private function adminDashboard(string $uid, Auth $auth, ?string $message = null, ?string $error = null): string
@@ -1401,6 +1431,11 @@ final class Router
                 }
 
                 $actorIds[] = $actorId;
+                $localFollowedUid = $this->localUidForActorId($actorId);
+                if ($localFollowedUid !== null) {
+                    $actorIds[] = $this->users->actorId($localFollowedUid);
+                    $actorIds = array_merge($actorIds, $this->users->legacyActorIds($localFollowedUid));
+                }
             }
         }
 

@@ -193,6 +193,14 @@ final class LocalUsers
             'discoverable' => false,
         ];
 
+        $aliases = array_values(array_filter(
+            $this->legacyActorIds($uid),
+            static fn (string $id): bool => $id !== $actorId
+        ));
+        if ($aliases !== []) {
+            $actor['alsoKnownAs'] = $aliases;
+        }
+
         $actor['icon'] = [
             'type' => 'Image',
             'mediaType' => str_ends_with(strtolower(parse_url($avatar, PHP_URL_PATH) ?: ''), '.png') ? 'image/png' : 'image/jpeg',
