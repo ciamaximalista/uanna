@@ -4,6 +4,8 @@ namespace Oannes;
 
 final class InteractionService
 {
+    private ?array $storedInteractionsByObject = null;
+
     public function __construct(
         private readonly FileStore $store,
         private readonly LocalUsers $users,
@@ -106,11 +108,21 @@ final class InteractionService
             return false;
         }
 
+        if (is_file($this->localPath($uid, $type, $objectId))) {
+            return true;
+        }
+
         $repo = new ObjectRepository($this->store);
         $object = $repo->findByIdOrAlias($objectId);
         $canonicalObjectId = $object !== null ? (ActivityPub::objectId($object) ?? $objectId) : $objectId;
 
         return is_file($this->localPath($uid, $type, $canonicalObjectId));
+    }
+
+    public function hasLocalReactionForCanonicalId(string $uid, string $objectId, string $type): bool
+    {
+        return in_array($type, ['Like', 'Announce'], true)
+            && is_file($this->localPath($uid, $type, $objectId));
     }
 
     public function toggle(string $uid, string $objectId, string $type): array
@@ -244,6 +256,12 @@ final class InteractionService
 
     private function storedInteractionsFor(string $objectId): array
     {
+        $this->storedInteractionsByObject ??= $this->storedInteractionsIndex();
+        return $this->storedInteractionsByObject[$objectId] ?? [];
+    }
+
+    private function storedInteractionsIndex(): array
+    {
         $items = [];
 
         foreach (glob(dirname($this->store->dataDir()) . '/../user/*/notify/*.json') ?: [] as $file) {
@@ -251,8 +269,8 @@ final class InteractionService
             $activity = is_array($record['msg'] ?? null) ? $record['msg'] : $record;
             $target = $record['objid'] ?? $activity['object'] ?? null;
 
-            if (is_string($target) && $target === $objectId && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
-                $items[] = $activity;
+            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
+                $items[$target][] = $activity;
             }
         }
 
@@ -260,8 +278,8 @@ final class InteractionService
             $activity = $this->readJsonFile($file);
             $target = $activity['object'] ?? null;
 
-            if (is_string($target) && $target === $objectId && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
-                $items[] = $activity;
+            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
+                $items[$target][] = $activity;
             }
         }
 

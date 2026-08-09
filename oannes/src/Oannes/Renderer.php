@@ -7,6 +7,7 @@ final class Renderer
     private readonly LocalUsers $users;
     private readonly ActorRepository $actors;
     private readonly InteractionService $interactions;
+    private array $actorInfoCache = [];
 
     public function __construct(
         private readonly ObjectRepository $repo,
@@ -295,8 +296,8 @@ final class Renderer
         $csrf = Html::escape((string)($actions['csrf'] ?? ''));
         $encodedId = Html::escape($id);
         $uid = (string)($actions['uid'] ?? '');
-        $liked = $uid !== '' && $this->interactions->hasLocalReaction($uid, $id, 'Like');
-        $boosted = $uid !== '' && $this->interactions->hasLocalReaction($uid, $id, 'Announce');
+        $liked = $uid !== '' && $this->interactions->hasLocalReactionForCanonicalId($uid, $id, 'Like');
+        $boosted = $uid !== '' && $this->interactions->hasLocalReactionForCanonicalId($uid, $id, 'Announce');
         $likeLabel = $liked ? 'Quitar fav' : 'Favoritear';
         $boostLabel = $boosted ? 'Quitar impulso' : 'Impulsar';
 
@@ -612,13 +613,17 @@ final class Renderer
 
     public function actorInfo(string $actorId): array
     {
+        if (isset($this->actorInfoCache[$actorId])) {
+            return $this->actorInfoCache[$actorId];
+        }
+
         foreach ($this->users->all() as $uid => $user) {
             $ids = array_merge([$this->users->actorId((string)$uid)], $this->users->legacyActorIds((string)$uid));
 
             if (in_array($actorId, $ids, true)) {
                 $name = (string)($user['name'] ?? $uid);
 
-                return [
+                return $this->actorInfoCache[$actorId] = [
                     'label' => $name !== '' ? $name . ' (@' . $uid . ')' : $actorId,
                     'avatar' => $this->users->avatarUrl($user),
                     'initial' => $this->initial((string)$uid),
@@ -638,7 +643,7 @@ final class Renderer
             }
         }
 
-        return [
+        return $this->actorInfoCache[$actorId] = [
             'label' => $name !== '' ? $name : 'Autor desconocido',
             'avatar' => $avatar,
             'initial' => $this->initial($name !== '' ? $name : '?'),
