@@ -63,7 +63,7 @@ final class Renderer
     {
         return '<footer class="site-footer"><p>' . $name
             . ' se hace con <a href="https://ruralnext.org/uanna" target="_blank" rel="noopener">Uanna</a>, '
-            . 'software libre con licencia <a href="https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12" target="_blank" rel="noopener">EUPL 1.2</a> '
+            . 'software libre con licencia <a href="https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12" target="_blank" rel="noopener">EUPL 1.2<img class="site-footer-logo eupl-logo" src="' . Html::escape($this->assetUrl('EUPL-logo-04.png')) . '" alt=""/></a> '
             . 'desarrollado por <a href="https://maximalista.coop" target="_blank" rel="noopener">Compañía Maximalista S.Coop<img class="site-footer-logo" src="' . Html::escape($this->assetUrl('maximalista.png')) . '" alt=""/></a> '
             . 'para <a href="https://ruralnext.org" target="_blank" rel="noopener">RuralNEXT</a>.</p></footer>';
     }

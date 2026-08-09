@@ -58,6 +58,10 @@ body {
     vertical-align: middle;
 }
 
+.site-footer-logo.eupl-logo {
+    height: 1.8em;
+}
+
 .topbar {
     position: sticky;
     top: 0;
