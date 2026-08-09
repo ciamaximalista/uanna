@@ -103,16 +103,27 @@ server {
 
 Abre la web en el navegador. Si no existe ningun usuario local, Uanna mostrara la pagina de registro del primer administrador. Ese usuario podra crear y editar usuarios, configurar la instancia y administrar bloqueos.
 
-## Tareas de fondo
+## Actualizacion de colas
 
-Para entregar actividades al Fediverso y procesar entradas pendientes conviene ejecutar periodicamente:
+Uanna procesa recepcion y envios de forma oportunista durante las visitas web normales. Cada peticion puede ejecutar un lote pequeno de inbox y entregas, con bloqueo de concurrencia y enfriamiento para no saturar la carga.
+
+Los limites se ajustan en `oannes/config/oannes.php`:
+
+```php
+'opportunistic_workers_enabled' => true,
+'opportunistic_workers_cooldown_seconds' => 15,
+'opportunistic_inbox_limit' => 5,
+'opportunistic_delivery_limit' => 2,
+```
+
+Para instancias con mucho trafico federado, o si quieres que todo avance aunque nadie visite la web durante horas, puedes mantener cron como apoyo:
 
 ```sh
 php oannes/bin/oannes.php queue-run 25
 php oannes/bin/oannes.php inbox-run 25
 ```
 
-Puedes hacerlo con cron, por ejemplo:
+Ejemplo:
 
 ```cron
 * * * * * cd /ruta/a/uanna && php oannes/bin/oannes.php queue-run 25 >/dev/null 2>&1

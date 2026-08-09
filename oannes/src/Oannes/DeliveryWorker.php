@@ -26,7 +26,8 @@ final class DeliveryWorker
             'delivery_enabled' => (bool)($this->config['delivery_enabled'] ?? false),
         ];
 
-        foreach ($this->queue->due($limit) as $job) {
+        $handled = 0;
+        foreach ($this->queue->due(100000) as $job) {
             $stats['checked']++;
 
             if (($job['type'] ?? null) !== 'deliver') {
@@ -34,6 +35,7 @@ final class DeliveryWorker
                 continue;
             }
 
+            $handled++;
             try {
                 $result = $this->deliver($job, $dryRun);
 
@@ -54,6 +56,10 @@ final class DeliveryWorker
                     $this->queue->fail($job, $e->getMessage(), $this->retrySeconds($attempts));
                     $stats['failed']++;
                 }
+            }
+
+            if ($handled >= $limit) {
+                break;
             }
         }
 

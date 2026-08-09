@@ -25,7 +25,8 @@ final class InboxWorker
             'other' => 0,
         ];
 
-        foreach ($this->queue->due($limit) as $job) {
+        $handled = 0;
+        foreach ($this->queue->due(100000) as $job) {
             $stats['checked']++;
 
             if (($job['type'] ?? null) !== 'inbox') {
@@ -33,6 +34,7 @@ final class InboxWorker
                 continue;
             }
 
+            $handled++;
             try {
                 $kind = $this->process($job);
                 $stats['processed']++;
@@ -48,6 +50,10 @@ final class InboxWorker
                     $this->queue->fail($job, $e->getMessage(), 60 * $attempts);
                     $stats['failed']++;
                 }
+            }
+
+            if ($handled >= $limit) {
+                break;
             }
         }
 
@@ -88,12 +94,49 @@ final class InboxWorker
         }
 
         if ($type === 'Create') {
+            if ($this->acceptCreateFromFollowed($localUid, $actorId, $activity)) {
+                return 'creates';
+            }
+
             $this->writeReview('creates', $record, $activity);
             return 'creates';
         }
 
         $this->writeReview('other', $record, $activity);
         return 'other';
+    }
+
+    private function acceptCreateFromFollowed(string $localUid, string $actorId, array $activity): bool
+    {
+        if ($localUid === '' || $actorId === '' || !(new SocialGraph($this->store))->isFollowing($localUid, $actorId)) {
+            return false;
+        }
+
+        $object = $activity['object'] ?? null;
+        if (!is_array($object)) {
+            return false;
+        }
+
+        $objectId = ActivityPub::objectId($object);
+        if ($objectId === null || !in_array(ActivityPub::objectType($object), ['Note', 'Article', 'Page', 'Question'], true)) {
+            return false;
+        }
+
+        $objectActor = ActivityPub::attributedTo($object);
+        if ($objectActor !== null && $objectActor !== $actorId) {
+            return false;
+        }
+
+        $repo = new ObjectRepository($this->store);
+        $existing = $repo->findByIdOrAlias($objectId);
+        $receivedBy = is_array($existing['_oannes_inbox_uids'] ?? null) ? $existing['_oannes_inbox_uids'] : [];
+        $receivedBy[] = $localUid;
+        $object['_oannes_inbox_uids'] = array_values(array_unique(array_filter($receivedBy, 'is_string')));
+
+        $this->store->writeObject($object);
+        (new IndexBuilder($this->store))->rebuild();
+
+        return true;
     }
 
     private function writeReview(string $kind, array $record, array $activity): void

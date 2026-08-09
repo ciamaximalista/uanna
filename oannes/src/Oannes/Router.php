@@ -4,6 +4,8 @@ namespace Oannes;
 
 final class Router
 {
+    private bool $timelineInboxRefreshed = false;
+
     public function __construct(
         private readonly array $config,
         private readonly FileStore $store,
@@ -26,6 +28,8 @@ final class Router
         if ($route === '') {
             $route = $this->routeFromRequestPath();
         }
+
+        $this->runOpportunisticMaintenance($route, $method);
 
         if ($this->users->all() === [] && $route !== 'setup') {
             $this->setup($method);
@@ -1370,6 +1374,8 @@ final class Router
 
     private function privateTimeline(string $uid): array
     {
+        $this->refreshTimelineInbox();
+
         $graph = new SocialGraph($this->store);
         $relations = new SocialRelationService($this->store);
         $actorIds = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
@@ -1386,7 +1392,70 @@ final class Router
             }
         }
 
-        return $this->repo->byAnyActor(array_values(array_unique($actorIds)), 80);
+        return array_values(array_filter(
+            $this->repo->byAnyActor(array_values(array_unique($actorIds)), 80),
+            fn (array $object): bool => $this->objectVisibleInUserTimeline($uid, $object)
+        ));
+    }
+
+    private function refreshTimelineInbox(): void
+    {
+        if ($this->timelineInboxRefreshed || !(bool)($this->config['inbox_enabled'] ?? false)) {
+            return;
+        }
+
+        $this->timelineInboxRefreshed = true;
+
+        try {
+            $limit = max(1, min(50, (int)($this->config['timeline_refresh_inbox_limit'] ?? 10)));
+            (new InboxWorker($this->store, new FileQueue($this->store)))->run($limit);
+        } catch (\Throwable) {
+            // Timeline rendering must not fail because one remote activity is malformed.
+        }
+    }
+
+    private function runOpportunisticMaintenance(string $route, string $method): void
+    {
+        if (!in_array($method, ['GET', 'HEAD'], true)) {
+            return;
+        }
+
+        if ($route === '.well-known/webfinger' || $route === '.well-known/nodeinfo' || str_starts_with($route, 'nodeinfo/')) {
+            return;
+        }
+
+        if (preg_match('#^u/[^/]+/(?:inbox|outbox|followers|following)$#', $route) === 1) {
+            return;
+        }
+
+        try {
+            (new OpportunisticMaintenance($this->store, $this->config))->run('web');
+        } catch (\Throwable) {
+            // Public pages and timelines must keep rendering even if maintenance fails.
+        }
+    }
+
+    private function objectVisibleInUserTimeline(string $uid, array $object): bool
+    {
+        if (ActivityPub::isPublicObject($object)) {
+            return true;
+        }
+
+        $receivedBy = $object['_oannes_inbox_uids'] ?? [];
+        if (is_array($receivedBy) && in_array($uid, $receivedBy, true)) {
+            return true;
+        }
+
+        $audience = ActivityPub::audience($object);
+        $localIds = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
+
+        foreach ($localIds as $actorId) {
+            if (in_array($actorId, $audience, true)) {
+                return true;
+            }
+        }
+
+        return ActivityPub::attributedTo($object) === $this->users->actorId($uid);
     }
 
     private function latestNotifications(string $uid, int $limit = 12): array
