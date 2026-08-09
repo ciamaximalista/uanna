@@ -1,0 +1,25 @@
+<?php
+
+return [
+    'host' => 'example.org',
+    'base_url' => 'https://example.org',
+    'data_dir' => dirname(__DIR__) . '/data',
+    'software_name' => 'Uanna',
+    'software_version' => '0.1.0',
+    'community_mode' => 'closed',
+    'allow_public_signup' => false,
+    'expose_social_graph' => false,
+    'delivery_enabled' => true,
+    'delivery_timeout_seconds' => 20,
+    'delivery_max_attempts' => 8,
+    'inbox_enabled' => true,
+    'inbox_max_bytes' => 262144,
+    'inbox_max_clock_skew_seconds' => 43200,
+    'default_locale' => 'es',
+    'timezone' => 'Europe/Madrid',
+    'max_attachment_bytes' => 25 * 1024 * 1024,
+    'default_avatar_path' => '/uanna.png',
+    'public_path' => '',
+    'local_actor_path' => '/u',
+    'legacy_actor_paths' => [],
+];
