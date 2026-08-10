@@ -1243,6 +1243,12 @@ final class Router
         }
 
         try {
+            $recipient = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($to);
+            $recipientId = ActivityPub::objectId($recipient);
+            if ($recipientId === null) {
+                throw new \RuntimeException('No se pudo resolver el destinatario.');
+            }
+
             (new PostService(
                 $this->store,
                 $this->users,
@@ -1251,7 +1257,7 @@ final class Router
                 $this->config,
             ))->createNote($uid, $content, [
                 'visibility' => 'direct',
-                'to' => $to,
+                'to' => $recipientId,
             ]);
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());

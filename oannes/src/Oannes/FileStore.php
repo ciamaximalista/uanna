@@ -108,23 +108,30 @@ final class FileStore
     private function writeAtomic(string $path, string $content): void
     {
         $dir = dirname($path);
-        $tmpDir = $this->dataDir . '/tmp';
 
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             throw new RuntimeException("Cannot create directory: {$dir}");
         }
 
-        if (!is_dir($tmpDir) && !mkdir($tmpDir, 0775, true) && !is_dir($tmpDir)) {
-            throw new RuntimeException("Cannot create temp directory: {$tmpDir}");
+        @chmod($dir, 02775);
+
+        if (!is_writable($dir)) {
+            throw new RuntimeException("No write permission in target directory: {$dir}. Check that PHP and CLI use the same writable group.");
         }
 
-        $tmp = $tmpDir . '/write-' . bin2hex(random_bytes(12)) . '.tmp';
+        if (is_file($path) && !is_writable($path)) {
+            throw new RuntimeException("No write permission for target file: {$path}. Check file owner and group permissions.");
+        }
+
+        $tmp = $dir . '/.write-' . bin2hex(random_bytes(12)) . '.tmp';
         $bytes = file_put_contents($tmp, $content, LOCK_EX);
 
         if ($bytes === false || $bytes !== strlen($content)) {
             @unlink($tmp);
             throw new RuntimeException("Cannot write temporary file: {$tmp}");
         }
+
+        @chmod($tmp, 0664);
 
         $handle = fopen($tmp, 'rb');
         if ($handle === false) {
@@ -139,5 +146,7 @@ final class FileStore
             @unlink($tmp);
             throw new RuntimeException("Cannot move {$tmp} to {$path}");
         }
+
+        @chmod($path, 0664);
     }
 }

@@ -38,7 +38,7 @@ Uanna se distribuye bajo la Licencia Publica de la Union Europea, version 1.2, E
 - Servidor web con soporte PHP, por ejemplo Apache con PHP-FPM, Nginx con PHP-FPM o el servidor integrado de PHP para pruebas.
 - Extensiones PHP: `json`, `openssl`, `mbstring`, `fileinfo`, `gd`, `dom` y `zip`.
 - Un dominio con HTTPS valido para federar correctamente.
-- Permisos de escritura para PHP en `oannes/data` y `oannes/public/assets`.
+- Permisos de escritura para PHP en `oannes/data`, `user` y `oannes/public/assets`.
 
 ## Instalacion
 
@@ -63,12 +63,35 @@ Edita `oannes/config/oannes.php` y cambia al menos:
 'timezone' => 'Europe/Madrid',
 ```
 
-Crea los directorios de datos y assets, y da permisos de escritura al usuario del servidor web:
+Crea los directorios de datos y assets, y da permisos de escritura al usuario del servidor web. Uanna escribe desde PHP, asi que el propietario operativo debe ser el usuario real de Apache/PHP-FPM (`www-data`, `apache`, `nginx`, `nobody` u otro segun el servidor). Si tambien vas a lanzar tareas desde consola, anade tu usuario al mismo grupo.
 
 ```sh
-mkdir -p oannes/data oannes/public/assets
-chmod -R u+rwX,o-rwx oannes/data oannes/public/assets
+cd /ruta/a/uanna
+
+# Cambia estos valores por el usuario/grupo real de PHP en tu servidor.
+WEB_USER=www-data
+WEB_GROUP=www-data
+
+sudo install -d -m 2775 -o "$WEB_USER" -g "$WEB_GROUP" oannes/data user oannes/public/assets
+sudo chown -R "$WEB_USER:$WEB_GROUP" oannes/data user oannes/public/assets
+sudo find oannes/data user oannes/public/assets -type d -exec chmod 2775 {} +
+sudo find oannes/data user oannes/public/assets -type f -exec chmod 0664 {} +
+
+# Opcional, solo si vas a ejecutar comandos de mantenimiento desde tu usuario shell.
+sudo usermod -aG "$WEB_GROUP" "$USER"
 ```
+
+Cierra sesion y vuelve a entrar si has cambiado grupos con `usermod`.
+
+Para detectar el usuario de PHP mira los procesos web que no sean `root`:
+
+```sh
+ps -eo user,comm,args | grep -E 'apache2|httpd|php-fpm|nginx' | grep -v root
+```
+
+En Apache con PHP-FPM de Debian/Ubuntu suele ser `www-data:www-data`; en Apache de algunas instalaciones compartidas puede ser `nobody:nogroup`; en CentOS/RHEL puede ser `apache:apache`; en Nginx con PHP-FPM depende del `user` configurado en el pool.
+
+No mezcles datos creados por usuarios distintos sin grupo comun escribible. Si unos ficheros quedan como `david` y otros como `nobody`, las notificaciones, respuestas, adjuntos o colas pueden fallar aunque el sitio parezca cargar bien.
 
 Configura el servidor web para que el document root apunte a:
 
@@ -205,6 +228,47 @@ En ese caso configura la instancia asi antes de publicar contenido nuevo:
 ```
 
 Con esa configuracion, el actor principal seguira siendo `https://dominio.org/usuario` y la ruta `/u/usuario` quedara como alias compatible. Usa esta opcion solo para migraciones que necesiten preservar identidades antiguas; para instalaciones nuevas es mejor mantener `/u/usuario`.
+
+## Politica de permisos
+
+Uanna lee y escribe archivos JSON, XML y adjuntos directamente en disco. No usa base de datos, por lo que los permisos del sistema son parte de la instalacion.
+
+La regla recomendada es:
+
+- El usuario que ejecuta PHP debe poder leer y escribir `oannes/data`, `user` y `oannes/public/assets`.
+- Todos esos directorios deben tener setgid (`2775`) para que los archivos nuevos hereden el grupo correcto.
+- Los archivos deben quedar en `0664` y los directorios en `2775`.
+- Si se ejecutan comandos desde consola, el usuario shell debe pertenecer al mismo grupo que PHP.
+- No deben mezclarse propietarios incompatibles como `david` y `nobody` si el grupo no tiene escritura.
+
+Para reparar una instalacion existente:
+
+```sh
+cd /ruta/a/uanna
+
+WEB_USER=www-data
+WEB_GROUP=www-data
+
+sudo chown -R "$WEB_USER:$WEB_GROUP" oannes/data user oannes/public/assets
+sudo find oannes/data user oannes/public/assets -type d -exec chmod 2775 {} +
+sudo find oannes/data user oannes/public/assets -type f -exec chmod 0664 {} +
+sudo usermod -aG "$WEB_GROUP" "$USER"
+```
+
+Despues de `usermod`, cierra sesion y vuelve a entrar para que el grupo se aplique a tu shell.
+
+En maximalismo.red se han visto directorios creados por `nobody:nogroup`, asi que si PHP esta corriendo realmente como `nobody`, la reparacion concreta seria:
+
+```sh
+cd /var/www/html/puntored
+
+sudo chown -R nobody:nogroup oannes/data user oannes/public/assets
+sudo find oannes/data user oannes/public/assets -type d -exec chmod 2775 {} +
+sudo find oannes/data user oannes/public/assets -type f -exec chmod 0664 {} +
+sudo usermod -aG nogroup david
+```
+
+Si el servidor usa `www-data`, cambia `nobody:nogroup` por `www-data:www-data`. Lo importante es que PHP y las tareas de consola trabajen sobre el mismo grupo escribible.
 
 ## Datos y copias de seguridad
 

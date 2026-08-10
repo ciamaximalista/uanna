@@ -60,10 +60,14 @@ final class MediaUploadService
             throw new \RuntimeException('No se pudo preparar el directorio de adjuntos.');
         }
 
+        @chmod($dir, 02775);
+
         $target = $dir . '/' . $fileName;
         if (!move_uploaded_file($tmp, $target)) {
             throw new \RuntimeException('No se pudo guardar la imagen adjunta.');
         }
+
+        @chmod($target, 0664);
 
         return [
             'type' => 'Document',

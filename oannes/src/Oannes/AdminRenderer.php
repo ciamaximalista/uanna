@@ -525,7 +525,7 @@ final class AdminRenderer
     {
         $html = '<form method="post" action="?route=admin/private-message" class="private-compose">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
-            . '<label>Destinatario <input name="to" type="url" placeholder="https://..." required/></label>'
+            . '<label>Destinatario <input name="to" type="text" placeholder="@usuario, @usuario@servidor.org o https://..." required/></label>'
             . '<label>Mensaje <textarea name="content" rows="5" required></textarea></label>'
             . '<button type="submit">Enviar privado</button>'
             . '</form>';

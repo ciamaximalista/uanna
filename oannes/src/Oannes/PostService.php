@@ -93,6 +93,9 @@ final class PostService
         }
 
         $this->store->writeObject($note);
+        if ($visibility === 'direct') {
+            $this->indexLocalPrivateRecipients($note);
+        }
         (new IndexBuilder($this->store))->rebuild();
 
         $create = [
@@ -461,6 +464,10 @@ final class PostService
             return [];
         }
 
+        if ($this->localUidForActor($directTo) !== null) {
+            return [];
+        }
+
         $actor = (new ActorRepository($this->store))->findById($directTo);
         if ($actor === null) {
             throw new \InvalidArgumentException('No tengo el actor destinatario en caché. Usa un actor al que sigas o que ya haya interactuado.');
@@ -472,5 +479,53 @@ final class PostService
         }
 
         return [$inbox];
+    }
+
+    private function indexLocalPrivateRecipients(array $note): void
+    {
+        $id = ActivityPub::objectId($note);
+        if ($id === null) {
+            return;
+        }
+
+        $root = dirname($this->store->dataDir(), 2);
+        $hash = md5($id);
+
+        foreach (ActivityPub::audience($note) as $actorId) {
+            $localUid = $this->localUidForActor($actorId);
+            if ($localUid === null) {
+                continue;
+            }
+
+            $privateDir = $root . '/user/' . $localUid . '/private';
+            $this->store->writeJson($privateDir . '/' . $hash . '.json', $note);
+            $this->appendPrivateIndex($root . '/user/' . $localUid . '/private.idx', $hash);
+        }
+    }
+
+    private function appendPrivateIndex(string $path, string $hash): void
+    {
+        $lines = is_file($path) ? (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) : [];
+        $lines = array_values(array_unique(array_filter(array_map('trim', $lines), static fn (string $line): bool => $line !== '')));
+
+        if (!in_array($hash, $lines, true)) {
+            array_unshift($lines, $hash);
+        }
+
+        $this->store->writeText($path, implode("\n", $lines) . "\n");
+    }
+
+    private function localUidForActor(string $actorId): ?string
+    {
+        foreach ($this->users->all() as $uid => $user) {
+            $uid = (string)$uid;
+            $ids = array_merge([$this->users->actorId($uid), $this->users->webUrl($uid)], $this->users->legacyActorIds($uid));
+
+            if (in_array($actorId, $ids, true)) {
+                return $uid;
+            }
+        }
+
+        return null;
     }
 }

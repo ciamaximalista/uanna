@@ -67,12 +67,16 @@ final class ProfileImageService
             throw new \RuntimeException('No se pudo crear el directorio de imágenes.');
         }
 
+        @chmod($dir, 02775);
+
         $name = $field . '-oannes-' . bin2hex(random_bytes(8)) . '.jpg';
         $path = $dir . '/' . $name;
 
         if (!imagejpeg($target, $path, 88)) {
             throw new \RuntimeException('No se pudo guardar la imagen.');
         }
+
+        @chmod($path, 0664);
 
         imagedestroy($source);
         imagedestroy($target);

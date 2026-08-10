@@ -44,10 +44,15 @@ final class InstanceAssetService
             throw new \RuntimeException('No se pudo crear el directorio de assets.');
         }
 
+        @chmod($dir, 02775);
+
         $name = $field . '-' . substr(hash('sha256', $bytes), 0, 16) . '.' . $extension;
-        if (!move_uploaded_file($tmp, $dir . '/' . $name)) {
+        $path = $dir . '/' . $name;
+        if (!move_uploaded_file($tmp, $path)) {
             throw new \RuntimeException('No se pudo guardar la imagen.');
         }
+
+        @chmod($path, 0664);
 
         return '/assets/instance/' . $name;
     }
