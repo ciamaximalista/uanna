@@ -110,6 +110,14 @@ final class InboxWorker
             return 'creates';
         }
 
+        if ($type === 'Update' && $this->acceptUpdate($localUid, $actorId, $activity)) {
+            return 'other';
+        }
+
+        if ($type === 'Announce' && $this->acceptReplyMentionAnnounce($localUid, $actorId, $activity)) {
+            return 'other';
+        }
+
         if (in_array($type, ['Like', 'Announce'], true) && $this->acceptInteraction($localUid, $activity)) {
             return 'other';
         }
@@ -281,6 +289,66 @@ final class InboxWorker
         return true;
     }
 
+    private function acceptUpdate(string $localUid, string $actorId, array $activity): bool
+    {
+        if ($localUid === '' || $actorId === '') {
+            return false;
+        }
+
+        $object = $activity['object'] ?? null;
+        if (!is_array($object)) {
+            return false;
+        }
+
+        $objectId = ActivityPub::objectId($object);
+        if ($objectId === null || !in_array(ActivityPub::objectType($object), ['Note', 'Article', 'Page', 'Question'], true)) {
+            return false;
+        }
+
+        $objectActor = ActivityPub::attributedTo($object);
+        if ($objectActor !== null && $objectActor !== $actorId) {
+            return false;
+        }
+
+        $this->storeAcceptedObject($localUid, $object);
+        $url = $this->objectUrl($object);
+        if ($url !== '') {
+            $this->store->writeJson($this->actorStatePath($actorId, 'last-update'), [
+                'actor' => $actorId,
+                'object' => $objectId,
+                'url' => $url,
+                'updated_at' => gmdate('c'),
+            ]);
+        }
+
+        return true;
+    }
+
+    private function acceptReplyMentionAnnounce(string $localUid, string $actorId, array $activity): bool
+    {
+        if ($localUid === '' || $actorId === '' || !$this->isReplyMentionAnnounce($activity)) {
+            return false;
+        }
+
+        $target = $activity['object'] ?? null;
+        if (!is_string($target) || $target === '') {
+            return false;
+        }
+
+        $source = $this->lastActorUpdateUrl($actorId) ?: $this->recentActorUpdateUrl($localUid, $actorId) ?: $actorId;
+        $this->writeNotification($localUid, 'Webmention', $source, $target, ActivityPub::published($activity));
+
+        return true;
+    }
+
+    private function isReplyMentionAnnounce(array $activity): bool
+    {
+        $id = ActivityPub::objectId($activity) ?? '';
+        $path = parse_url($id, PHP_URL_PATH);
+
+        return is_string($path) && str_contains($path, '/reply-announces/');
+    }
+
     private function acceptUndo(string $localUid, array $activity): bool
     {
         if ($localUid === '') {
@@ -363,6 +431,68 @@ final class InboxWorker
             . '/'
             . Id::digest($actor . ':' . $type . ':' . $object)
             . '.json';
+    }
+
+    private function actorStatePath(string $actorId, string $name): string
+    {
+        return $this->store->dataDir() . '/state/actors/' . Id::digest($actorId) . '/' . $name . '.json';
+    }
+
+    private function lastActorUpdateUrl(string $actorId): string
+    {
+        $path = $this->actorStatePath($actorId, 'last-update');
+        if (!is_file($path)) {
+            return '';
+        }
+
+        $state = $this->readJsonFile($path);
+        $url = $state['url'] ?? null;
+
+        return is_string($url) ? $url : '';
+    }
+
+    private function recentActorUpdateUrl(string $localUid, string $actorId): string
+    {
+        $files = glob($this->store->dataDir() . '/inbox/accepted/' . rawurlencode($localUid) . '/*.json') ?: [];
+        rsort($files);
+
+        foreach ($files as $file) {
+            $record = $this->readJsonFile($file);
+            $activity = is_array($record['activity'] ?? null) ? $record['activity'] : [];
+            if (($activity['type'] ?? null) !== 'Update' || ActivityPub::attributedTo($activity) !== $actorId) {
+                continue;
+            }
+
+            $object = is_array($activity['object'] ?? null) ? $activity['object'] : [];
+            $url = $this->objectUrl($object);
+            if ($url !== '') {
+                return $url;
+            }
+        }
+
+        return '';
+    }
+
+    private function objectUrl(array $object): string
+    {
+        $url = $object['url'] ?? null;
+        if (is_string($url) && $url !== '') {
+            return $url;
+        }
+
+        if (is_array($url)) {
+            foreach ($url as $item) {
+                if (is_string($item) && $item !== '') {
+                    return $item;
+                }
+
+                if (is_array($item) && is_string($item['href'] ?? null) && $item['href'] !== '') {
+                    return $item['href'];
+                }
+            }
+        }
+
+        return ActivityPub::objectId($object) ?? '';
     }
 
     private function readJsonFile(string $path): array

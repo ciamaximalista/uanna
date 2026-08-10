@@ -17,6 +17,7 @@ final class SimulationRunner
             $this->scenarioFollowReject($i);
             $this->scenarioCreateModeration($i);
             $this->scenarioInteractionAccept($i);
+            $this->scenarioReplyMentionAnnounce($i);
             $this->scenarioLocalUserAutoFollow($i);
             $this->scenarioAdminSocializeUser($i);
             $this->scenarioUserArchive($i);
@@ -384,6 +385,60 @@ final class SimulationRunner
 
         $this->check('incoming like accepted without moderation', ($counts['likes'] ?? 0) === 1);
         $this->check('incoming announce accepted without moderation', ($counts['boosts'] ?? 0) === 1);
+    }
+
+    private function scenarioReplyMentionAnnounce(int $iteration): void
+    {
+        $env = $this->environment('reply-announce-' . $iteration);
+        $object = [
+            'id' => $env['config']['base_url'] . '/u/ana/p/reply-announce-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => $env['config']['base_url'] . '/u/ana',
+            'published' => gmdate('c'),
+            'content' => 'Reply target',
+        ];
+        $env['store']->writeObject($object);
+        (new IndexBuilder($env['store']))->rebuild();
+
+        $sourceUrl = 'https://remote.test/posts/source-' . $iteration;
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/update-source-' . $iteration,
+            'type' => 'Update',
+            'actor' => $env['remote_actor'],
+            'object' => [
+                'id' => 'https://remote.test/objects/source-' . $iteration,
+                'type' => 'Article',
+                'attributedTo' => $env['remote_actor'],
+                'url' => $sourceUrl,
+                'published' => gmdate('c'),
+                'content' => 'Source with replies',
+            ],
+        ]);
+        $this->receive($env, [
+            'id' => 'https://remote.test/actor/reply-announces/' . $iteration,
+            'type' => 'Announce',
+            'actor' => $env['remote_actor'],
+            'object' => $object['id'],
+            'published' => gmdate('c'),
+        ]);
+
+        (new InboxWorker($env['store'], $env['queue']))->run(10);
+        $counts = (new InteractionService(
+            $env['store'],
+            new LocalUsers($env['store'], $env['config']),
+            $env['queue'],
+            new SocialGraph($env['store']),
+            new ActorRepository($env['store']),
+            $env['config'],
+        ))->counts($object);
+        $notifyRoot = dirname($env['store']->dataDir(), 2);
+        if ($notifyRoot === '/') {
+            $notifyRoot = $env['store']->dataDir();
+        }
+        $notify = $env['store']->readJson($notifyRoot . '/user/ana/notify/' . Id::digest('Webmention:' . $sourceUrl . ':' . $object['id']) . '.json');
+
+        $this->check('reply announce does not count as boost', ($counts['boosts'] ?? 0) === 0);
+        $this->check('reply announce becomes webmention', ($notify['type'] ?? null) === 'Webmention' && ($notify['actor'] ?? null) === $sourceUrl);
     }
 
     private function environment(string $name): array

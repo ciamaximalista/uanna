@@ -269,7 +269,7 @@ final class InteractionService
             $activity = is_array($record['msg'] ?? null) ? $record['msg'] : $record;
             $target = $record['objid'] ?? $activity['object'] ?? null;
 
-            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
+            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
                 $items[$target][] = $activity;
             }
         }
@@ -278,7 +278,7 @@ final class InteractionService
             $activity = $this->readJsonFile($file);
             $target = $activity['object'] ?? null;
 
-            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
+            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
                 $items[$target][] = $activity;
             }
         }
@@ -287,12 +287,24 @@ final class InteractionService
             $activity = $this->readJsonFile($file);
             $target = $activity['object'] ?? null;
 
-            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
+            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
                 $items[$target][] = $activity;
             }
         }
 
         return $items;
+    }
+
+    private function isReplyMentionAnnounce(array $activity): bool
+    {
+        if (($activity['type'] ?? null) !== 'Announce') {
+            return false;
+        }
+
+        $id = ActivityPub::objectId($activity) ?? '';
+        $path = parse_url($id, PHP_URL_PATH);
+
+        return is_string($path) && str_contains($path, '/reply-announces/');
     }
 
     private function storeLocal(string $uid, array $activity): void
