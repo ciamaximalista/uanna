@@ -126,6 +126,12 @@ final class AdminRenderer
             . '<p class="meta">La clave inicial es obligatoria si el usuario importado todavía no existe en el nodo.</p>'
             . '<button type="submit">Importar usuario</button>'
             . '</form>';
+        $socializeHtml = '<form method="post" action="?route=instance-admin/socialize-user" class="instance-form">'
+            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+            . '<label>Usuario a socializar <input name="actor_query" placeholder="@natalia o maximalismo@maximalismo.blog" required/></label>'
+            . '<p class="meta">El usuario indicado pasará a estar en los seguidos de todos los usuarios locales. Si es externo se enviará un Follow federado por cada cuenta local.</p>'
+            . '<button type="submit">Socializar usuario</button>'
+            . '</form>';
         $editUsersHtml = '<div class="actor-list">';
 
         foreach ($users as $uid => $user) {
@@ -165,6 +171,7 @@ final class AdminRenderer
             . $this->panelBox('Servidores bloqueados', $serversHtml)
             . $this->panelBox('Crear usuarios', $createUsersHtml)
             . $this->panelBox('Importar usuario', $importUsersHtml)
+            . $this->panelBox('Socializar usuario', $socializeHtml)
             . $this->panelBox('Editar usuarios', $editUsersHtml));
     }
 

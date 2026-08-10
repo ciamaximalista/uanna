@@ -21,9 +21,10 @@ final class RemoteActorResolver
         foreach ($this->users->all() as $uid => $user) {
             $uid = (string)$uid;
             $acct = '@' . $uid . '@' . (string)$this->config['host'];
+            $localHandle = '@' . $uid;
             $ids = array_merge([$this->users->actorId($uid), $this->users->webUrl($uid)], $this->users->legacyActorIds($uid));
 
-            if ($input === $acct || in_array($input, $ids, true)) {
+            if ($input === $localHandle || $input === $acct || in_array($input, $ids, true)) {
                 return $this->users->activityPubActor($uid, is_array($user) ? $user : []);
             }
         }

@@ -196,6 +196,11 @@ final class Router
             return;
         }
 
+        if ($route === 'instance-admin/socialize-user') {
+            $this->instanceAdminSocializeUser($method);
+            return;
+        }
+
         if ($route === 'admin/moderation/follow') {
             $this->adminModerationFollow($method);
             return;
@@ -803,6 +808,35 @@ final class Router
         $this->instanceAdmin('Usuario ' . (string)($result['uid'] ?? '') . ' importado con ' . (string)($result['objects'] ?? 0) . ' posts.');
     }
 
+    private function instanceAdminSocializeUser(string $method): void
+    {
+        [, $auth] = $this->requireInstanceAdmin();
+        if ($method !== 'POST' || !$auth->checkCsrf(is_string($_POST['csrf'] ?? null) ? $_POST['csrf'] : null)) {
+            $this->instanceAdmin(null, 'Solicitud no válida.');
+            return;
+        }
+
+        try {
+            $query = is_string($_POST['actor_query'] ?? null) ? trim($_POST['actor_query']) : '';
+            if ($query === '') {
+                throw new \RuntimeException('Indica un usuario a socializar.');
+            }
+
+            $actor = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($query);
+            $actorId = ActivityPub::objectId($actor);
+            if ($actorId === null) {
+                throw new \RuntimeException('Actor no válido.');
+            }
+
+            $result = $this->socializeActor($actorId);
+        } catch (\Throwable $e) {
+            $this->instanceAdmin(null, $e->getMessage());
+            return;
+        }
+
+        $this->instanceAdmin('Usuario socializado: ' . (string)($result['followed'] ?? 0) . ' cuentas lo siguen; ' . (string)($result['already'] ?? 0) . ' ya lo seguían.');
+    }
+
     private function adminPost(string $method): void
     {
         $auth = $this->auth ?? new Auth($this->store);
@@ -1404,6 +1438,37 @@ final class Router
             'unblock' => $this->setActorBlocked($uid, $actorId, $relations, false),
             default => throw new \RuntimeException('Acción no válida.'),
         };
+    }
+
+    private function socializeActor(string $actorId): array
+    {
+        $graph = new SocialGraph($this->store);
+        $localTargetUid = $this->localUidForActorId($actorId);
+        $followed = 0;
+        $already = 0;
+        $skipped = 0;
+
+        foreach ($this->users->all() as $uid => $_user) {
+            $uid = (string)$uid;
+            if ($localTargetUid !== null && $uid === $localTargetUid) {
+                $skipped++;
+                continue;
+            }
+
+            if ($graph->isFollowing($uid, $actorId)) {
+                $already++;
+                continue;
+            }
+
+            $this->followActor($uid, $actorId, $graph);
+            $followed++;
+        }
+
+        return [
+            'followed' => $followed,
+            'already' => $already,
+            'skipped' => $skipped,
+        ];
     }
 
     private function followActor(string $uid, string $actorId, SocialGraph $graph): string

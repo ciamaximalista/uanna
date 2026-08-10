@@ -18,6 +18,7 @@ final class SimulationRunner
             $this->scenarioCreateModeration($i);
             $this->scenarioInteractionAccept($i);
             $this->scenarioLocalUserAutoFollow($i);
+            $this->scenarioAdminSocializeUser($i);
             $this->scenarioUserArchive($i);
             $this->scenarioInboxSecurity($i);
             $this->scenarioNegativeInputs($i);
@@ -185,6 +186,36 @@ final class SimulationRunner
         $this->check('existing local users follow new user', $graph->isFollowing('ana', $beaActor));
         $this->check('new local user has existing followers', $graph->isFollower('bea', $anaActor));
         $this->check('existing local user has new follower', $graph->isFollower('ana', $beaActor));
+    }
+
+    private function scenarioAdminSocializeUser(int $iteration): void
+    {
+        $env = $this->environment('socialize-' . $iteration);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $users->create('bea', 'Bea');
+        $remote = [
+            'id' => 'https://remote.test/socialized-' . $iteration,
+            'type' => 'Person',
+            'preferredUsername' => 'socialized',
+            'inbox' => 'https://remote.test/socialized/inbox',
+        ];
+        $env['store']->writeActor($remote);
+
+        $router = new Router(
+            $env['config'],
+            $env['store'],
+            new ObjectRepository($env['store']),
+            new Renderer(new ObjectRepository($env['store']), $env['config']),
+            $users,
+        );
+        $method = new \ReflectionMethod($router, 'socializeActor');
+        $result = $method->invoke($router, (string)$remote['id']);
+        $graph = new SocialGraph($env['store']);
+
+        $this->check('admin socialize follows actor from first local user', $graph->isFollowing('ana', (string)$remote['id']));
+        $this->check('admin socialize follows actor from second local user', $graph->isFollowing('bea', (string)$remote['id']));
+        $this->check('admin socialize queues remote follows', count($this->deliverJobs($env['queue'])) === 2);
+        $this->check('admin socialize reports additions', ($result['followed'] ?? 0) === 2);
     }
 
     private function scenarioUserArchive(int $iteration): void
