@@ -166,15 +166,15 @@ final class AdminRenderer
 
         return $this->renderer->page('Panel de administración', $messageHtml . $errorHtml
             . $this->panelBox('Instancia', $instanceHtml)
-            . $this->panelBox('Actualizaciones', $updatesHtml, $openBox === 'updates')
             . $this->panelBox('Imágenes de instancia', $settingsHtml)
+            . $this->panelBox('Actualizaciones', $updatesHtml, $openBox === 'updates')
             . $this->panelBox('Avisos de bloqueo', $noticesHtml)
             . $this->panelBox('Servidores bloqueados', $serversHtml)
             . $this->panelBox('Crear usuarios', $createUsersHtml)
+            . $this->panelBox('Editar usuarios', $editUsersHtml)
             . $this->panelBox('Importar usuario', $importUsersHtml)
             . $this->panelBox('Socializar usuario', $socializeHtml)
-            . $this->panelBox('Compilar app', $appHtml, $openBox === 'app')
-            . $this->panelBox('Editar usuarios', $editUsersHtml));
+            . $this->panelBox('Compilar app', $appHtml, $openBox === 'app'));
     }
 
     public function dashboard(
@@ -307,7 +307,7 @@ final class AdminRenderer
 
         $name = Html::escape((string)($manifest['app_name'] ?? 'Uanna'));
         return '<p><a class="button-link" href="' . Html::escape($url) . '">Descargar app</a></p>'
-            . '<p class="meta">APK Android de ' . $name . ' para esta instancia.</p>';
+            . '<p class="meta">App instalable en Android de ' . $name . '.</p>';
     }
 
     private function profileForm(string $uid, array $profile, string $csrf): string
