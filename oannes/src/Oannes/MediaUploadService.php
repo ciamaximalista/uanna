@@ -16,8 +16,9 @@ final class MediaUploadService
             return null;
         }
 
-        if ((int)($upload['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
-            throw new \RuntimeException('No se pudo subir la imagen adjunta.');
+        $error = (int)($upload['error'] ?? UPLOAD_ERR_OK);
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new \RuntimeException($this->uploadErrorMessage($error));
         }
 
         $size = (int)($upload['size'] ?? 0);
@@ -62,6 +63,10 @@ final class MediaUploadService
 
         @chmod($dir, 02775);
 
+        if (!is_writable($dir)) {
+            throw new \RuntimeException('No se puede escribir en el directorio de adjuntos. Revisa permisos de user/' . $uid . '/static.');
+        }
+
         $target = $dir . '/' . $fileName;
         if (!move_uploaded_file($tmp, $target)) {
             throw new \RuntimeException('No se pudo guardar la imagen adjunta.');
@@ -76,5 +81,18 @@ final class MediaUploadService
             'name' => trim($alt),
             'summary' => trim($alt),
         ];
+    }
+
+    private function uploadErrorMessage(int $error): string
+    {
+        return match ($error) {
+            UPLOAD_ERR_INI_SIZE => 'La imagen supera el límite de subida configurado en PHP (' . ini_get('upload_max_filesize') . ').',
+            UPLOAD_ERR_FORM_SIZE => 'La imagen supera el límite permitido por el formulario.',
+            UPLOAD_ERR_PARTIAL => 'La imagen se subió sólo parcialmente. Inténtalo de nuevo.',
+            UPLOAD_ERR_NO_TMP_DIR => 'PHP no tiene directorio temporal para subidas.',
+            UPLOAD_ERR_CANT_WRITE => 'PHP no pudo escribir la subida temporal en disco.',
+            UPLOAD_ERR_EXTENSION => 'Una extensión de PHP bloqueó la subida.',
+            default => 'No se pudo subir la imagen adjunta.',
+        };
     }
 }

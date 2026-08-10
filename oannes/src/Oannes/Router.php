@@ -887,6 +887,11 @@ final class Router
         $inReplyTo = $_POST['inReplyTo'] ?? null;
         $imageAlt = $_POST['image_alt'] ?? '';
 
+        if ($this->requestBodyExceedsPhpLimit()) {
+            echo $this->adminDashboard($uid, $auth, null, 'La publicación supera el límite de subida configurado en PHP (' . ini_get('post_max_size') . ').');
+            return;
+        }
+
         if (!$auth->checkCsrf(is_string($csrf) ? $csrf : null) || !is_string($content)) {
             echo $this->adminDashboard($uid, $auth, null, 'Solicitud no válida.');
             return;
@@ -936,6 +941,11 @@ final class Router
         $id = $_POST['id'] ?? null;
         $content = $_POST['content'] ?? null;
         $imageAlt = $_POST['image_alt'] ?? '';
+
+        if ($this->requestBodyExceedsPhpLimit()) {
+            echo $this->adminDashboard($uid, $auth, null, 'La publicación supera el límite de subida configurado en PHP (' . ini_get('post_max_size') . ').');
+            return;
+        }
 
         if (!$auth->checkCsrf(is_string($csrf) ? $csrf : null) || !is_string($id) || !is_string($content)) {
             echo $this->adminDashboard($uid, $auth, null, 'Solicitud no válida.');
@@ -1244,6 +1254,37 @@ final class Router
         }
 
         return $this->homeLocation();
+    }
+
+    private function requestBodyExceedsPhpLimit(): bool
+    {
+        $contentLength = $_SERVER['CONTENT_LENGTH'] ?? null;
+        if (!is_string($contentLength) && !is_int($contentLength)) {
+            return false;
+        }
+
+        $bytes = (int)$contentLength;
+        $limit = $this->iniBytes((string)ini_get('post_max_size'));
+
+        return $bytes > 0 && $limit > 0 && $bytes > $limit && $_POST === [];
+    }
+
+    private function iniBytes(string $value): int
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return 0;
+        }
+
+        $unit = strtolower(substr($value, -1));
+        $number = (float)$value;
+
+        return match ($unit) {
+            'g' => (int)round($number * 1024 * 1024 * 1024),
+            'm' => (int)round($number * 1024 * 1024),
+            'k' => (int)round($number * 1024),
+            default => (int)$number,
+        };
     }
 
     private function adminPrivateMessage(string $method): void
