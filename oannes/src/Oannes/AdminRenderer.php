@@ -119,6 +119,13 @@ final class AdminRenderer
             . '<label>Clave <input name="password" type="password" required/></label>'
             . '<label class="check-row"><input name="admin" type="checkbox" value="1"/><span>Administrador</span></label>'
             . '<button type="submit">Crear usuario</button></form>';
+        $importUsersHtml = '<form method="post" action="?route=instance-admin/import-user" enctype="multipart/form-data" class="instance-form">'
+            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+            . '<label>Archivo XML o ZIP <input name="archive" type="file" accept="application/xml,text/xml,application/zip,.xml,.zip" required/></label>'
+            . '<label>Clave inicial <input name="password" type="password" autocomplete="new-password"/></label>'
+            . '<p class="meta">La clave inicial es obligatoria si el usuario importado todavía no existe en el nodo.</p>'
+            . '<button type="submit">Importar usuario</button>'
+            . '</form>';
         $editUsersHtml = '<div class="actor-list">';
 
         foreach ($users as $uid => $user) {
@@ -157,6 +164,7 @@ final class AdminRenderer
             . $this->panelBox('Avisos de bloqueo', $noticesHtml)
             . $this->panelBox('Servidores bloqueados', $serversHtml)
             . $this->panelBox('Crear usuarios', $createUsersHtml)
+            . $this->panelBox('Importar usuario', $importUsersHtml)
             . $this->panelBox('Editar usuarios', $editUsersHtml));
     }
 
@@ -185,6 +193,7 @@ final class AdminRenderer
         $notificationsHtml = $this->notifications($notifications, $pendingFollows, $pendingCreates, $csrf);
         $socialHtml = $this->socialColumns($uid, $csrf, $followers, $following, $socialStates);
         $privateHtml = $this->privateMessages($privateMessages, $csrf);
+        $migrationHtml = $this->migrationTools($uid, $csrf);
         $profileLink = $profileUrl !== ''
             ? '<a class="button-link secondary" href="' . Html::escape($profileUrl) . '">Ver perfil</a>'
             : '';
@@ -203,6 +212,7 @@ final class AdminRenderer
             . $this->panelBox('Notificaciones', $notificationsHtml, $focus === 'notifications', 'notifications')
             . $this->panelBox('Mensajes privados', $privateHtml)
             . $this->panelBox('Red', $socialHtml)
+            . $this->panelBox('Exportar / Migrar', $migrationHtml)
             . '<div class="panel-bottom-actions">' . $logout . '</div>');
     }
 
@@ -222,6 +232,23 @@ final class AdminRenderer
             . '<button type="submit">Buscar</button>'
             . '</form>'
             . ($query !== '' ? '<div class="timeline-search-results">' . ($results !== '' ? $results : '<p class="muted">Sin resultados.</p>') . '</div>' : '');
+    }
+
+    private function migrationTools(string $uid, string $csrf): string
+    {
+        return '<div class="migration-tools">'
+            . '<a class="button-link" href="?route=admin/export-user">Descargar ZIP</a>'
+            . '<form method="post" action="?route=admin/delete-content" class="danger-zone">'
+            . '<input type="hidden" name="csrf" value="' . Html::escape($csrf) . '"/>'
+            . '<label>Confirmar borrado de contenido <input name="confirm" placeholder="' . Html::escape($uid) . '"/></label>'
+            . '<button type="submit" class="danger">Borrar todo mi contenido</button>'
+            . '</form>'
+            . '<form method="post" action="?route=admin/delete-account" class="danger-zone">'
+            . '<input type="hidden" name="csrf" value="' . Html::escape($csrf) . '"/>'
+            . '<label>Confirmar baja de usuario <input name="confirm" placeholder="' . Html::escape($uid) . '"/></label>'
+            . '<button type="submit" class="danger">Dar de baja mi usuario</button>'
+            . '</form>'
+            . '</div>';
     }
 
     private function profileForm(string $uid, array $profile, string $csrf): string

@@ -18,6 +18,7 @@ final class SimulationRunner
             $this->scenarioCreateModeration($i);
             $this->scenarioInteractionAccept($i);
             $this->scenarioLocalUserAutoFollow($i);
+            $this->scenarioUserArchive($i);
             $this->scenarioInboxSecurity($i);
             $this->scenarioNegativeInputs($i);
             $this->scenarioDeliveryDryRun($i);
@@ -186,6 +187,46 @@ final class SimulationRunner
         $this->check('existing local user has new follower', $graph->isFollower('ana', $beaActor));
     }
 
+    private function scenarioUserArchive(int $iteration): void
+    {
+        $env = $this->environment('archive-' . $iteration);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $post = (new PostService($env['store'], $users, $env['queue'], new SocialGraph($env['store']), $env['config']))
+            ->createNote('ana', 'Archive me ' . $iteration);
+        $mediaDir = rtrim((string)$env['config']['root_dir'], '/') . '/user/ana/static';
+        if (!is_dir($mediaDir) && !mkdir($mediaDir, 0775, true) && !is_dir($mediaDir)) {
+            throw new RuntimeException('Cannot create simulation media dir');
+        }
+        $mediaPath = $mediaDir . '/archive-test.txt';
+        file_put_contents($mediaPath, 'archive attachment ' . $iteration);
+        $post['attachment'] = [[
+            'type' => 'Document',
+            'mediaType' => 'text/plain',
+            'url' => $env['config']['base_url'] . '/ana/s/archive-test.txt',
+            'name' => 'Archive attachment',
+        ]];
+        $env['store']->writeObject($post);
+        (new IndexBuilder($env['store']))->rebuild();
+        $archive = new UserArchiveService($env['store'], $users, $env['config']);
+        $xml = $archive->exportXml('ana');
+        $zip = $archive->exportZip('ana');
+
+        $import = $this->environment('archive-import-' . $iteration);
+        $import['config']['base_url'] = 'https://imported.test';
+        $importStore = new FileStore($import['config']['data_dir']);
+        $importUsers = new LocalUsers($importStore, $import['config']);
+        $result = (new UserArchiveService($importStore, $importUsers, $import['config']))->importArchive($zip, 'secret123', true);
+        $imported = (new ObjectRepository($importStore))->byActor($importUsers->actorId('ana'), 10);
+        $importedAttachment = is_array($imported[0]['attachment'][0] ?? null) ? $imported[0]['attachment'][0] : [];
+        $deleted = $archive->deleteUserContent('ana');
+
+        $this->check('archive export contains uanna root', str_contains($xml, '<uanna-user-archive'));
+        $this->check('archive import restores objects', ($result['objects'] ?? 0) >= 1 && count($imported) >= 1);
+        $this->check('archive import rewrites actor', ActivityPub::attributedTo($imported[0] ?? []) === $importUsers->actorId('ana'));
+        $this->check('archive zip restores local media', str_starts_with((string)($importedAttachment['url'] ?? ''), 'https://imported.test/ana/s/'));
+        $this->check('archive delete removes local content', $deleted >= 1 && (new ObjectRepository($env['store']))->findByIdOrAlias((string)$post['id']) === null);
+    }
+
     private function scenarioNegativeInputs(int $iteration): void
     {
         $unknown = $this->environment('unknown-actor-' . $iteration);
@@ -321,6 +362,7 @@ final class SimulationRunner
             'host' => 'example.test',
             'base_url' => 'https://example.test',
             'data_dir' => $dir,
+            'root_dir' => dirname($dir),
             'public_path' => '/index.php',
             'local_actor_path' => '/u',
             'legacy_actor_paths' => [],

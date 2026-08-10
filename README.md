@@ -19,8 +19,10 @@ Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni 
 - Adjuntos de imagen con texto alternativo.
 - Edicion y borrado de publicaciones propias con envio de actividades ActivityPub.
 - Panel de usuario con perfil, notificaciones, seguidores, seguidos, busqueda y mensajes privados.
+- Exportacion de usuario desde el panel en ZIP, con `archive.xml` y adjuntos locales incluidos.
 - Notificaciones con contador de no leidas y pendientes, enlaces a perfiles originales y publicaciones afectadas.
 - Panel de administracion para configurar imagenes, nombre, presentacion, usuarios, actualizaciones y bloqueos.
+- Importacion de usuarios desde XML o ZIP Uanna, restaurando perfil, posts y adjuntos.
 - Moderacion para altas, seguimientos, publicaciones pendientes, bloqueos de actores y servidores.
 - Actualizacion de recepcion y envios por cron o al detectarse actividad, sin saturar visitas normales.
 - Importacion y herramientas de diagnostico para migraciones desde snac.
@@ -34,7 +36,7 @@ Uanna se distribuye bajo la Licencia Publica de la Union Europea, version 1.2, E
 
 - PHP 8.1 o superior.
 - Servidor web con soporte PHP, por ejemplo Apache con PHP-FPM, Nginx con PHP-FPM o el servidor integrado de PHP para pruebas.
-- Extensiones PHP: `json`, `openssl`, `mbstring`, `fileinfo`, `gd` y `dom`.
+- Extensiones PHP: `json`, `openssl`, `mbstring`, `fileinfo`, `gd`, `dom` y `zip`.
 - Un dominio con HTTPS valido para federar correctamente.
 - Permisos de escritura para PHP en `oannes/data` y `oannes/public/assets`.
 
@@ -152,6 +154,27 @@ php oannes/bin/oannes.php auth-audit
 php oannes/bin/oannes.php readiness 20
 ```
 
+## Exportacion e importacion de usuarios
+
+Cada usuario puede descargar desde `Panel > Exportar / Migrar` un archivo ZIP de migracion. El paquete contiene:
+
+```text
+usuario-uanna.zip
+archive.xml
+media/
+```
+
+`archive.xml` incluye el perfil y todos los posts locales del usuario. Si esos posts tienen imagenes o documentos adjuntos almacenados en la instancia, Uanna los copia dentro de `media/` y reescribe sus URLs como rutas relativas.
+
+Desde `Panel > Exportar / Migrar` el usuario tambien puede borrar todo su contenido o dar de baja su cuenta, escribiendo su nombre de usuario como confirmacion.
+
+El administrador puede importar usuarios desde `Panel de administracion > Importar usuario`. La importacion acepta:
+
+- XML simple generado por Uanna.
+- ZIP completo generado por Uanna, con `archive.xml` y adjuntos.
+
+Al importar un ZIP, Uanna restaura los adjuntos en el directorio estatico del usuario de la nueva instancia, reescribe sus URLs publicas y reconstruye los indices. Si el usuario aun no existe, el administrador debe indicar una clave inicial.
+
 Para migraciones desde snac:
 
 ```sh
@@ -185,11 +208,12 @@ Con esa configuracion, el actor principal seguira siendo `https://dominio.org/us
 
 ## Datos y copias de seguridad
 
-Los datos vivos de una instancia estan en `oannes/data` y no forman parte del repositorio. Haz copias de seguridad de ese directorio y de `oannes/public/assets`.
+Los datos vivos de una instancia estan en `oannes/data` y no forman parte del repositorio. Los adjuntos y archivos estaticos de usuarios viven en `user/<usuario>/static`. Haz copias de seguridad de `oannes/data`, `user` y `oannes/public/assets`.
 
 No publiques nunca:
 
 - `oannes/data`
+- `user`
 - `oannes/public/assets`
 - `oannes/config/oannes.php`
 - backups de migracion

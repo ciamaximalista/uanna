@@ -136,6 +136,21 @@ final class Router
             return;
         }
 
+        if ($route === 'admin/export-user') {
+            $this->adminExportUser($method);
+            return;
+        }
+
+        if ($route === 'admin/delete-content') {
+            $this->adminDeleteContent($method);
+            return;
+        }
+
+        if ($route === 'admin/delete-account') {
+            $this->adminDeleteAccount($method);
+            return;
+        }
+
         if ($route === 'admin/react') {
             $this->adminReact($method);
             return;
@@ -173,6 +188,11 @@ final class Router
 
         if ($route === 'instance-admin/users') {
             $this->instanceAdminUsers($method);
+            return;
+        }
+
+        if ($route === 'instance-admin/import-user') {
+            $this->instanceAdminImportUser($method);
             return;
         }
 
@@ -754,6 +774,35 @@ final class Router
         $this->instanceAdmin('Usuarios actualizados.');
     }
 
+    private function instanceAdminImportUser(string $method): void
+    {
+        [, $auth] = $this->requireInstanceAdmin();
+        if ($method !== 'POST' || !$auth->checkCsrf(is_string($_POST['csrf'] ?? null) ? $_POST['csrf'] : null)) {
+            $this->instanceAdmin(null, 'Solicitud no válida.');
+            return;
+        }
+
+        try {
+            $file = $_FILES['archive'] ?? null;
+            if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                throw new \RuntimeException('Sube un archivo XML o ZIP válido.');
+            }
+
+            $tmp = $file['tmp_name'] ?? '';
+            if (!is_string($tmp) || !is_uploaded_file($tmp)) {
+                throw new \RuntimeException('No se pudo leer el archivo subido.');
+            }
+
+            $password = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
+            $result = $this->archiveService()->importArchive($tmp, $password, true);
+        } catch (\Throwable $e) {
+            $this->instanceAdmin(null, $e->getMessage());
+            return;
+        }
+
+        $this->instanceAdmin('Usuario ' . (string)($result['uid'] ?? '') . ' importado con ' . (string)($result['objects'] ?? 0) . ' posts.');
+    }
+
     private function adminPost(string $method): void
     {
         $auth = $this->auth ?? new Auth($this->store);
@@ -972,6 +1021,100 @@ final class Router
         }
 
         echo $this->adminDashboard($uid, $auth, 'Perfil guardado.');
+    }
+
+    private function adminExportUser(string $method): void
+    {
+        $auth = $this->auth ?? new Auth($this->store);
+        $uid = $auth->currentUser();
+
+        if ($uid === null) {
+            header('Location: ?route=admin/login');
+            return;
+        }
+
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        try {
+            $zipPath = $this->archiveService()->exportZip($uid);
+        } catch (\Throwable $e) {
+            echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
+            return;
+        }
+
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . rawurlencode($uid) . '-uanna.zip"');
+        header('Content-Length: ' . filesize($zipPath));
+        readfile($zipPath);
+        unlink($zipPath);
+    }
+
+    private function adminDeleteContent(string $method): void
+    {
+        $auth = $this->auth ?? new Auth($this->store);
+        $uid = $auth->currentUser();
+
+        if ($uid === null) {
+            header('Location: ?route=admin/login');
+            return;
+        }
+
+        if ($method !== 'POST') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $csrf = $_POST['csrf'] ?? null;
+        $confirm = is_string($_POST['confirm'] ?? null) ? trim($_POST['confirm']) : '';
+        if (!$auth->checkCsrf(is_string($csrf) ? $csrf : null) || $confirm !== $uid) {
+            echo $this->adminDashboard($uid, $auth, null, 'Para borrar tu contenido escribe tu usuario.');
+            return;
+        }
+
+        try {
+            $deleted = $this->archiveService()->deleteUserContent($uid);
+        } catch (\Throwable $e) {
+            echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
+            return;
+        }
+
+        echo $this->adminDashboard($uid, $auth, 'Contenido borrado: ' . $deleted . ' posts.');
+    }
+
+    private function adminDeleteAccount(string $method): void
+    {
+        $auth = $this->auth ?? new Auth($this->store);
+        $uid = $auth->currentUser();
+
+        if ($uid === null) {
+            header('Location: ?route=admin/login');
+            return;
+        }
+
+        if ($method !== 'POST') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $csrf = $_POST['csrf'] ?? null;
+        $confirm = is_string($_POST['confirm'] ?? null) ? trim($_POST['confirm']) : '';
+        if (!$auth->checkCsrf(is_string($csrf) ? $csrf : null) || $confirm !== $uid) {
+            echo $this->adminDashboard($uid, $auth, null, 'Para dar de baja tu usuario escribe tu usuario.');
+            return;
+        }
+
+        try {
+            $this->archiveService()->deleteUserAndContent($uid);
+            $auth->logout();
+        } catch (\Throwable $e) {
+            echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
+            return;
+        }
+
+        header('Location: /');
     }
 
     private function adminReact(string $method): void
@@ -1229,6 +1372,11 @@ final class Router
             new SocialGraph($this->store),
             new FileQueue($this->store),
         );
+    }
+
+    private function archiveService(): UserArchiveService
+    {
+        return new UserArchiveService($this->store, $this->users, $this->config);
     }
 
     private function pendingModeration(string $uid): array
