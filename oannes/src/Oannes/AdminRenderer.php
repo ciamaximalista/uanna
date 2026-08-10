@@ -249,6 +249,14 @@ final class AdminRenderer
             . '</div>'
             . '<label>Bio <textarea name="bio" rows="5">' . $bio . '</textarea></label>'
             . '<label class="check-row"><input name="approve_followers" type="checkbox" value="1"' . $approve . '/><span>Aprobar seguidores manualmente</span></label>'
+            . '<section class="password-change">'
+            . '<h3>Cambiar contraseña</h3>'
+            . '<div class="form-grid">'
+            . '<label>Contraseña actual <input name="current_password" type="password" autocomplete="current-password"/></label>'
+            . '<label>Nueva contraseña <input name="new_password" type="password" autocomplete="new-password"/></label>'
+            . '<label>Repetir nueva contraseña <input name="new_password_confirm" type="password" autocomplete="new-password"/></label>'
+            . '</div>'
+            . '</section>'
             . '<button type="submit">Guardar perfil</button>'
             . '</form>';
     }

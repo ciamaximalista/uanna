@@ -17,6 +17,7 @@ final class SimulationRunner
             $this->scenarioFollowReject($i);
             $this->scenarioCreateModeration($i);
             $this->scenarioInteractionAccept($i);
+            $this->scenarioLocalUserAutoFollow($i);
             $this->scenarioInboxSecurity($i);
             $this->scenarioNegativeInputs($i);
             $this->scenarioDeliveryDryRun($i);
@@ -168,6 +169,21 @@ final class SimulationRunner
         $this->check('post note creates id', is_string($note['id'] ?? null));
         $this->check('dry-run skips delivery', ($stats['skipped'] ?? 0) === 1 && ($stats['delivered'] ?? 1) === 0);
         $this->check('dry-run keeps job pending', count($pending) === 1);
+    }
+
+    private function scenarioLocalUserAutoFollow(int $iteration): void
+    {
+        $env = $this->environment('local-users-' . $iteration);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $graph = new SocialGraph($env['store']);
+        $users->create('bea', 'Bea');
+        $anaActor = $users->actorId('ana');
+        $beaActor = $users->actorId('bea');
+
+        $this->check('new local user follows existing users', $graph->isFollowing('bea', $anaActor));
+        $this->check('existing local users follow new user', $graph->isFollowing('ana', $beaActor));
+        $this->check('new local user has existing followers', $graph->isFollower('bea', $anaActor));
+        $this->check('existing local user has new follower', $graph->isFollower('ana', $beaActor));
     }
 
     private function scenarioNegativeInputs(int $iteration): void

@@ -936,9 +936,36 @@ final class Router
                 $fields['header'] = $header;
             }
 
+            $currentPassword = is_string($_POST['current_password'] ?? null) ? $_POST['current_password'] : '';
+            $newPassword = is_string($_POST['new_password'] ?? null) ? $_POST['new_password'] : '';
+            $newPasswordConfirm = is_string($_POST['new_password_confirm'] ?? null) ? $_POST['new_password_confirm'] : '';
+            $changePassword = $currentPassword !== '' || $newPassword !== '' || $newPasswordConfirm !== '';
+
+            if ($changePassword) {
+                if ($currentPassword === '' || $newPassword === '' || $newPasswordConfirm === '') {
+                    throw new \RuntimeException('Para cambiar la contraseña rellena los tres campos.');
+                }
+
+                if (!$auth->verifyPassword($uid, $currentPassword)) {
+                    throw new \RuntimeException('La contraseña actual no es correcta.');
+                }
+
+                if ($newPassword !== $newPasswordConfirm) {
+                    throw new \RuntimeException('La nueva contraseña no coincide.');
+                }
+
+                if (strlen($newPassword) < 8) {
+                    throw new \RuntimeException('La nueva contraseña debe tener al menos 8 caracteres.');
+                }
+            }
+
             $this->users->updateProfile($uid, [
                 ...$fields,
             ]);
+
+            if ($changePassword) {
+                $auth->setPassword($uid, $newPassword);
+            }
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
             return;

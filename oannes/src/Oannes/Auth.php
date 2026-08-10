@@ -52,19 +52,7 @@ final class Auth
 
     public function login(string $uid, string $password): bool
     {
-        $record = $this->readUserAuth($uid);
-
-        if ($record === null) {
-            return false;
-        }
-
-        $hash = $record['password_hash'] ?? null;
-        $legacyHash = $record['snac_passwd'] ?? null;
-
-        if (
-            (!is_string($hash) || !password_verify($password, $hash))
-            && (!is_string($legacyHash) || !$this->verifySnacPassword($uid, $password, $legacyHash))
-        ) {
+        if (!$this->verifyPassword($uid, $password)) {
             return false;
         }
 
@@ -74,6 +62,21 @@ final class Auth
         $_SESSION['csrf'] = bin2hex(random_bytes(24));
 
         return true;
+    }
+
+    public function verifyPassword(string $uid, string $password): bool
+    {
+        $record = $this->readUserAuth($uid);
+
+        if ($record === null) {
+            return false;
+        }
+
+        $hash = $record['password_hash'] ?? null;
+        $legacyHash = $record['snac_passwd'] ?? null;
+
+        return (is_string($hash) && password_verify($password, $hash))
+            || (is_string($legacyHash) && $this->verifySnacPassword($uid, $password, $legacyHash));
     }
 
     public function logout(): void
@@ -92,11 +95,10 @@ final class Auth
             throw new \InvalidArgumentException('Invalid local user id');
         }
 
-        $record = [
-            'uid' => $uid,
-            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'updated_at' => gmdate('c'),
-        ];
+        $record = $this->readUserAuth($uid) ?? ['uid' => $uid];
+        $record['uid'] = $uid;
+        $record['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+        $record['updated_at'] = gmdate('c');
 
         $this->store->writeJson($this->path($uid), $record);
     }

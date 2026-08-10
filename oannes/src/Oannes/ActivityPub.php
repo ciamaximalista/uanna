@@ -64,7 +64,7 @@ final class ActivityPub
     {
         $aliases = [];
 
-        foreach (['id', 'url', 'atomUri'] as $field) {
+        foreach (['id', 'url', 'atomUri', 'alsoKnownAs'] as $field) {
             $value = $object[$field] ?? null;
 
             if (is_string($value) && $value !== '') {
