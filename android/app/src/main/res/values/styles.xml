@@ -1,0 +1,12 @@
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:navigationBarColor">@android:color/white</item>
+        <item name="android:windowSplashScreenBackground">@color/uanna_green</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/uanna</item>
+    </style>
+</resources>

@@ -201,6 +201,11 @@ final class Router
             return;
         }
 
+        if ($route === 'instance-admin/compile-app') {
+            $this->instanceAdminCompileApp($method);
+            return;
+        }
+
         if ($route === 'admin/moderation/follow') {
             $this->adminModerationFollow($method);
             return;
@@ -649,7 +654,8 @@ final class Router
             $settings->blockNotices(),
             $message,
             $error,
-            $openBox
+            $openBox,
+            (new AndroidAppBuilder($this->store, $this->config))->status()
         );
     }
 
@@ -835,6 +841,28 @@ final class Router
         }
 
         $this->instanceAdmin('Usuario socializado: ' . (string)($result['followed'] ?? 0) . ' cuentas lo siguen; ' . (string)($result['already'] ?? 0) . ' ya lo seguían.');
+    }
+
+    private function instanceAdminCompileApp(string $method): void
+    {
+        [, $auth] = $this->requireInstanceAdmin();
+        if ($method !== 'POST' || !$auth->checkCsrf(is_string($_POST['csrf'] ?? null) ? $_POST['csrf'] : null)) {
+            $this->instanceAdmin(null, 'Solicitud no válida.', 'app');
+            return;
+        }
+
+        try {
+            $settings = new InstanceSettings($this->store, $this->config);
+            $manifest = (new AndroidAppBuilder($this->store, $this->config))->build(
+                $settings->instanceName(),
+                $settings->faviconPath()
+            );
+        } catch (\Throwable $e) {
+            $this->instanceAdmin(null, $e->getMessage(), 'app');
+            return;
+        }
+
+        $this->instanceAdmin('APK compilado: ' . (string)($manifest['url'] ?? ''), null, 'app');
     }
 
     private function adminPost(string $method): void
@@ -1670,6 +1698,7 @@ final class Router
             $this->socialStates($uid),
             $timelineSearchQuery,
             $timelineSearchResults,
+            (new AndroidAppBuilder($this->store, $this->config))->manifest(),
         );
     }
 

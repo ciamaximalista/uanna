@@ -22,6 +22,7 @@ Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni 
 - Exportacion de usuario desde el panel en ZIP, con `archive.xml` y adjuntos locales incluidos.
 - Notificaciones con contador de no leidas y pendientes, enlaces a perfiles originales y publicaciones afectadas.
 - Panel de administracion para configurar imagenes, nombre, presentacion, usuarios, actualizaciones y bloqueos.
+- Compilacion de app Android desde el panel de administracion, usando el nombre y favicon de la instancia.
 - Importacion de usuarios desde XML o ZIP Uanna, restaurando perfil, posts y adjuntos.
 - Moderacion para altas, seguimientos, publicaciones pendientes, bloqueos de actores y servidores.
 - Actualizacion de recepcion y envios por cron o al detectarse actividad, sin saturar visitas normales.
@@ -39,6 +40,7 @@ Uanna se distribuye bajo la Licencia Publica de la Union Europea, version 1.2, E
 - Extensiones PHP: `json`, `openssl`, `mbstring`, `fileinfo`, `gd`, `dom` y `zip`.
 - Un dominio con HTTPS valido para federar correctamente.
 - Permisos de escritura para PHP en `oannes/data`, `user` y `oannes/public/assets`.
+- Opcional para compilar app Android desde el panel: JDK 17, Gradle y Android SDK con platform/build-tools compatibles.
 
 ## Instalacion
 
@@ -166,6 +168,40 @@ Tambien muestra el bloque de `crontab` recomendado, sustituyendo `/ruta/a/uanna`
 ```
 
 El panel incluye ademas un comando para guardar esas lineas en el crontab del usuario actual.
+
+## App Android
+
+El repositorio incluye un proyecto Android ligero en `android/`. La app abre la instancia en una WebView a pantalla completa, mantiene la sesion, permite subir archivos y muestra notificaciones locales mientras esta abierta cuando sube el contador del panel.
+
+Desde `Panel de administracion > Compilar app`, el administrador puede generar un APK para la instancia:
+
+- El nombre de la app se toma del nombre de instancia.
+- El icono se genera a partir del favicon de la instancia.
+- La URL cargada por la app se toma de `base_url`.
+- El APK resultante se publica en `oannes/public/assets/instance/uanna-app.apk`.
+- Cuando existe un APK compilado, todos los usuarios ven la caja `Descargar app` en su panel.
+
+Si faltan dependencias, la caja `Compilar app` indica que debe instalarse. Para compilar en el servidor hacen falta:
+
+- JDK 17.
+- Gradle.
+- Android SDK con platform `android-35` y build-tools.
+
+En Debian/Ubuntu, el JDK puede instalarse con:
+
+```sh
+sudo apt install openjdk-17-jdk
+```
+
+Gradle y Android SDK pueden instalarse con Android Studio, con los command line tools de Android o dejando una toolchain local en:
+
+```text
+android/.toolchain/jdk
+android/.toolchain/gradle/current
+android/.toolchain/sdk
+```
+
+La toolchain, los builds, APKs, claves y `local.properties` no forman parte del repositorio.
 
 ## Comandos utiles
 

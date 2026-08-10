@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Maximalismo</string>
+    <string name="site_url">https://maximalismo.red</string>
+    <string name="notification_channel">Maximalismo</string>
+</resources>

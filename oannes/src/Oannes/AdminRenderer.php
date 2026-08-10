@@ -43,7 +43,7 @@ final class AdminRenderer
             . '</form></section>');
     }
 
-    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockNotices, ?string $message = null, ?string $error = null, string $openBox = ''): string
+    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockNotices, ?string $message = null, ?string $error = null, string $openBox = '', array $appBuild = []): string
     {
         $csrf = Html::escape($this->auth->csrfToken());
         $messageHtml = $message !== null ? '<p class="notice">' . Html::escape($message) . '</p>' : '';
@@ -132,6 +132,7 @@ final class AdminRenderer
             . '<p class="meta">El usuario indicado pasará a estar en los seguidos de todos los usuarios locales. Si es externo se enviará un Follow federado por cada cuenta local.</p>'
             . '<button type="submit">Socializar usuario</button>'
             . '</form>';
+        $appHtml = $this->appBuildBox($csrf, $appBuild);
         $editUsersHtml = '<div class="actor-list">';
 
         foreach ($users as $uid => $user) {
@@ -172,6 +173,7 @@ final class AdminRenderer
             . $this->panelBox('Crear usuarios', $createUsersHtml)
             . $this->panelBox('Importar usuario', $importUsersHtml)
             . $this->panelBox('Socializar usuario', $socializeHtml)
+            . $this->panelBox('Compilar app', $appHtml, $openBox === 'app')
             . $this->panelBox('Editar usuarios', $editUsersHtml));
     }
 
@@ -190,7 +192,8 @@ final class AdminRenderer
         array $privateMessages = [],
         array $socialStates = [],
         string $timelineSearchQuery = '',
-        string $timelineSearchResults = ''
+        string $timelineSearchResults = '',
+        ?array $appDownload = null
     ): string
     {
         $csrf = Html::escape($this->auth->csrfToken());
@@ -201,6 +204,7 @@ final class AdminRenderer
         $socialHtml = $this->socialColumns($uid, $csrf, $followers, $following, $socialStates);
         $privateHtml = $this->privateMessages($privateMessages, $csrf);
         $migrationHtml = $this->migrationTools($uid, $csrf);
+        $appDownloadHtml = $this->appDownloadBox($appDownload);
         $profileLink = $profileUrl !== ''
             ? '<a class="button-link secondary" href="' . Html::escape($profileUrl) . '">Ver perfil</a>'
             : '';
@@ -220,6 +224,7 @@ final class AdminRenderer
             . $this->panelBox('Mensajes privados', $privateHtml)
             . $this->panelBox('Red', $socialHtml)
             . $this->panelBox('Exportar / Migrar', $migrationHtml)
+            . ($appDownloadHtml !== '' ? $this->panelBox('Descargar app', $appDownloadHtml) : '')
             . '<div class="panel-bottom-actions">' . $logout . '</div>');
     }
 
@@ -256,6 +261,53 @@ final class AdminRenderer
             . '<button type="submit" class="danger">Dar de baja mi usuario</button>'
             . '</form>'
             . '</div>';
+    }
+
+    private function appBuildBox(string $csrf, array $status): string
+    {
+        $missing = is_array($status['missing'] ?? null) ? $status['missing'] : [];
+        $manifest = is_array($status['manifest'] ?? null) ? $status['manifest'] : null;
+        $html = '<div class="app-build-box">';
+
+        if ($missing !== []) {
+            $html .= '<p class="error">Faltan dependencias para compilar en este servidor.</p><ul class="plain-list">';
+            foreach ($missing as $item) {
+                $html .= '<li>' . Html::escape((string)$item) . '</li>';
+            }
+            $html .= '</ul><p class="meta">Cuando estén instaladas, vuelve a esta caja para compilar el APK.</p>';
+        } else {
+            $html .= '<p class="meta">La app se compilará con el nombre de la instancia y usará el favicon como icono.</p>'
+                . '<form method="post" action="?route=instance-admin/compile-app" class="admin-actions">'
+                . '<input type="hidden" name="csrf" value="' . Html::escape($csrf) . '"/>'
+                . '<button type="submit">Compilar APK</button>'
+                . '</form>';
+        }
+
+        if ($manifest !== null) {
+            $url = Html::escape((string)($manifest['url'] ?? ''));
+            $name = Html::escape((string)($manifest['app_name'] ?? 'App'));
+            $date = Html::escape((string)($manifest['built_at'] ?? ''));
+            $html .= '<p><a class="button-link" href="' . $url . '">Descargar último APK</a></p>'
+                . '<p class="meta">' . $name . ($date !== '' ? ' · ' . $date : '') . '</p>';
+        }
+
+        return $html . '</div>';
+    }
+
+    private function appDownloadBox(?array $manifest): string
+    {
+        if ($manifest === null) {
+            return '';
+        }
+
+        $url = is_string($manifest['url'] ?? null) ? $manifest['url'] : '';
+        if ($url === '') {
+            return '';
+        }
+
+        $name = Html::escape((string)($manifest['app_name'] ?? 'Uanna'));
+        return '<p><a class="button-link" href="' . Html::escape($url) . '">Descargar app</a></p>'
+            . '<p class="meta">APK Android de ' . $name . ' para esta instancia.</p>';
     }
 
     private function profileForm(string $uid, array $profile, string $csrf): string
