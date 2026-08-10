@@ -296,11 +296,20 @@ final class AdminRenderer
             $actor = $activity['actor'] ?? $record['actor'] ?? 'actor desconocido';
             $object = is_array($activity['object'] ?? null) ? $activity['object'] : [];
             $objectId = (string)($object['id'] ?? '');
+            $objectUrl = $this->objectUrl($object);
+            $replyTo = ActivityPub::inReplyTo($object) ?? '';
             $caseId = (string)($case['case_id'] ?? '');
+            $actorHtml = is_string($actor) ? $this->actorLink($actor) : 'actor desconocido';
+            $objectHtml = $objectUrl !== ''
+                ? '<a href="' . Html::escape($objectUrl) . '">' . Html::escape($objectUrl) . '</a>'
+                : ($objectId !== '' ? '<a href="' . Html::escape($objectId) . '">' . Html::escape($objectId) . '</a>' : '');
+            $replyHtml = $replyTo !== ''
+                ? '<p class="meta">En respuesta a <a href="' . Html::escape($replyTo) . '">' . Html::escape($replyTo) . '</a></p>'
+                : '';
 
             $html .= '<article class="notification follow-request">'
-                . '<div><strong>Publicación pendiente</strong><p class="meta">' . Html::escape(is_string($actor) ? $actor : 'actor desconocido') . '</p>'
-                . ($objectId !== '' ? '<p class="meta">' . Html::escape($objectId) . '</p>' : '')
+                . '<div><strong>Publicación pendiente</strong><p class="meta">' . $actorHtml . ($objectHtml !== '' ? ' publicó ' . $objectHtml : '') . '</p>'
+                . $replyHtml
                 . '</div>'
                 . '<form method="post" action="?route=admin/moderation/create" class="actions">'
                 . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
@@ -339,6 +348,10 @@ final class AdminRenderer
             return '<p class="meta">' . $this->actorLink($actor) . '</p>';
         }
 
+        if ($type === 'Create' && $actor !== '' && $objid !== '') {
+            return '<p class="meta">' . $this->actorLink($actor) . ' respondió en <a href="' . Html::escape($objid) . '">' . Html::escape($objid) . '</a></p>';
+        }
+
         if ($type === 'Webmention' && $actor !== '') {
             return '<p class="meta"><a href="' . Html::escape($actor) . '">' . Html::escape($actor) . '</a></p>';
         }
@@ -353,6 +366,29 @@ final class AdminRenderer
         $url = (string)($info['url'] ?? $actorId);
 
         return '<a href="' . Html::escape($url) . '">' . Html::escape($label !== '' ? $label : $actorId) . '</a>';
+    }
+
+    private function objectUrl(array $object): string
+    {
+        $url = $object['url'] ?? null;
+
+        if (is_string($url) && $url !== '') {
+            return $url;
+        }
+
+        if (is_array($url)) {
+            foreach ($url as $item) {
+                if (is_string($item) && $item !== '') {
+                    return $item;
+                }
+
+                if (is_array($item) && is_string($item['href'] ?? null) && $item['href'] !== '') {
+                    return $item['href'];
+                }
+            }
+        }
+
+        return ActivityPub::objectId($object) ?? '';
     }
 
     private function socialColumns(string $uid, string $csrf, array $followers, array $following, array $socialStates): string

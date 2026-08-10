@@ -98,12 +98,24 @@ final class InboxWorker
         }
 
         if ($type === 'Create') {
+            if ($this->acceptCreateFromUnblockedConversation($localUid, $actorId, $activity)) {
+                return 'creates';
+            }
+
             if ($this->acceptCreateFromFollowed($localUid, $actorId, $activity)) {
                 return 'creates';
             }
 
             $this->writeReview('creates', $record, $activity);
             return 'creates';
+        }
+
+        if (in_array($type, ['Like', 'Announce'], true) && $this->acceptInteraction($localUid, $activity)) {
+            return 'other';
+        }
+
+        if ($type === 'Undo' && $this->acceptUndo($localUid, $activity)) {
+            return 'other';
         }
 
         $this->writeReview('other', $record, $activity);
@@ -201,8 +213,166 @@ final class InboxWorker
 
         $this->store->writeObject($object);
         (new IndexBuilder($this->store))->rebuild();
+        $this->notifyAcceptedCreate($localUid, $activity, $object);
 
         return true;
+    }
+
+    private function acceptCreateFromUnblockedConversation(string $localUid, string $actorId, array $activity): bool
+    {
+        if ($localUid === '' || $actorId === '') {
+            return false;
+        }
+
+        $object = $activity['object'] ?? null;
+        if (!is_array($object)) {
+            return false;
+        }
+
+        $objectId = ActivityPub::objectId($object);
+        if ($objectId === null || !in_array(ActivityPub::objectType($object), ['Note', 'Article', 'Page', 'Question'], true)) {
+            return false;
+        }
+
+        $objectActor = ActivityPub::attributedTo($object);
+        if ($objectActor !== null && $objectActor !== $actorId) {
+            return false;
+        }
+
+        if (ActivityPub::inReplyTo($object) === null) {
+            return false;
+        }
+
+        $this->storeAcceptedObject($localUid, $object);
+        $this->notifyAcceptedCreate($localUid, $activity, $object);
+
+        return true;
+    }
+
+    private function storeAcceptedObject(string $localUid, array $object): void
+    {
+        $objectId = ActivityPub::objectId($object);
+        $existing = $objectId !== null ? (new ObjectRepository($this->store))->findByIdOrAlias($objectId) : null;
+        $receivedBy = is_array($existing['_oannes_inbox_uids'] ?? null) ? $existing['_oannes_inbox_uids'] : [];
+        $receivedBy[] = $localUid;
+        $object['_oannes_inbox_uids'] = array_values(array_unique(array_filter($receivedBy, 'is_string')));
+
+        $this->store->writeObject($object);
+        (new IndexBuilder($this->store))->rebuild();
+    }
+
+    private function acceptInteraction(string $localUid, array $activity): bool
+    {
+        if ($localUid === '') {
+            return false;
+        }
+
+        $type = ActivityPub::objectType($activity);
+        $actor = ActivityPub::attributedTo($activity);
+        $object = $activity['object'] ?? null;
+
+        if (!in_array($type, ['Like', 'Announce'], true) || $actor === null || !is_string($object) || $object === '') {
+            return false;
+        }
+
+        $this->store->writeJson($this->remoteInteractionPath($localUid, $actor, $type, $object), $activity);
+        $this->writeNotification($localUid, $type, $actor, $object, ActivityPub::published($activity));
+
+        return true;
+    }
+
+    private function acceptUndo(string $localUid, array $activity): bool
+    {
+        if ($localUid === '') {
+            return false;
+        }
+
+        $object = $activity['object'] ?? null;
+        if (is_array($object)) {
+            $type = ActivityPub::objectType($object);
+            $actor = ActivityPub::attributedTo($object);
+            $target = $object['object'] ?? null;
+
+            if (in_array($type, ['Like', 'Announce'], true) && $actor !== null && is_string($target) && $target !== '') {
+                $path = $this->remoteInteractionPath($localUid, $actor, $type, $target);
+                if (is_file($path)) {
+                    unlink($path);
+                }
+
+                return true;
+            }
+        }
+
+        $undoneId = is_string($object) ? $object : ActivityPub::objectId($activity);
+        if ($undoneId === null || $undoneId === '') {
+            return false;
+        }
+
+        foreach (glob($this->store->dataDir() . '/interactions/remote/' . rawurlencode($localUid) . '/*.json') ?: [] as $file) {
+            $stored = $this->readJsonFile($file);
+            if (ActivityPub::objectId($stored) === $undoneId) {
+                unlink($file);
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    private function notifyAcceptedCreate(string $localUid, array $activity, array $object): void
+    {
+        if (ActivityPub::inReplyTo($object) === null) {
+            return;
+        }
+
+        $actor = ActivityPub::attributedTo($activity) ?? ActivityPub::attributedTo($object) ?? '';
+        $objectId = ActivityPub::objectId($object) ?? '';
+        if ($actor === '' || $objectId === '') {
+            return;
+        }
+
+        $this->writeNotification($localUid, 'Create', $actor, $objectId, ActivityPub::published($object));
+    }
+
+    private function writeNotification(string $localUid, string $type, string $actor, string $objid, string $date = ''): void
+    {
+        $root = $this->notificationRoot();
+        $id = Id::digest($type . ':' . $actor . ':' . $objid);
+
+        $this->store->writeJson($root . '/user/' . rawurlencode($localUid) . '/notify/' . $id . '.json', [
+            'type' => $type,
+            'utype' => $type,
+            'actor' => $actor,
+            'objid' => $objid,
+            'date' => $date !== '' ? $date : gmdate('c'),
+        ]);
+    }
+
+    private function notificationRoot(): string
+    {
+        $root = dirname($this->store->dataDir(), 2);
+
+        return $root !== '/' ? $root : $this->store->dataDir();
+    }
+
+    private function remoteInteractionPath(string $localUid, string $actor, string $type, string $object): string
+    {
+        return $this->store->dataDir()
+            . '/interactions/remote/'
+            . rawurlencode($localUid)
+            . '/'
+            . Id::digest($actor . ':' . $type . ':' . $object)
+            . '.json';
+    }
+
+    private function readJsonFile(string $path): array
+    {
+        try {
+            $json = json_decode((string)file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+            return is_array($json) ? $json : [];
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     private function writeReview(string $kind, array $record, array $activity): void

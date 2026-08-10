@@ -283,6 +283,15 @@ final class InteractionService
             }
         }
 
+        foreach (glob($this->store->dataDir() . '/interactions/remote/*/*.json') ?: [] as $file) {
+            $activity = $this->readJsonFile($file);
+            $target = $activity['object'] ?? null;
+
+            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true)) {
+                $items[$target][] = $activity;
+            }
+        }
+
         return $items;
     }
 

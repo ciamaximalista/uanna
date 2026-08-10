@@ -16,6 +16,7 @@ final class SimulationRunner
             $this->scenarioFollowApprove($i);
             $this->scenarioFollowReject($i);
             $this->scenarioCreateModeration($i);
+            $this->scenarioInteractionAccept($i);
             $this->scenarioInboxSecurity($i);
             $this->scenarioNegativeInputs($i);
             $this->scenarioDeliveryDryRun($i);
@@ -108,11 +109,9 @@ final class SimulationRunner
         (new InboxWorker($env['store'], $env['queue']))->run();
         $moderation = $this->moderation($env);
         $pending = $moderation->pending('ana', 'creates');
-        $this->check('create pending exists', count($pending) === 1);
-        $result = $moderation->approveCreate('ana', (string)$pending[0]['case_id'], 'sim');
         $repo = new ObjectRepository($env['store']);
 
-        $this->check('create approve status', ($result['status'] ?? null) === 'approved');
+        $this->check('reply create accepted without moderation', count($pending) === 0);
         $this->check('create stored by alias', $repo->findByIdOrAlias('https://remote.test/@alex/' . $iteration) !== null);
         $this->check('create child linked by inReplyTo', count($repo->childrenOf((string)$parent['id'])) === 1);
         $this->check('create content URL ignored for parentage', count($repo->childrenOf($linkedButNotParent)) === 0);
@@ -259,6 +258,44 @@ final class SimulationRunner
         } catch (\Throwable $e) {
             $this->check('cross attribution rejected', $e->getMessage() === 'Create actor does not match object attribution');
         }
+    }
+
+    private function scenarioInteractionAccept(int $iteration): void
+    {
+        $env = $this->environment('interaction-' . $iteration);
+        $object = [
+            'id' => $env['config']['base_url'] . '/u/ana/p/interaction-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => $env['config']['base_url'] . '/u/ana',
+            'published' => gmdate('c'),
+            'content' => 'Interaction target',
+        ];
+        $env['store']->writeObject($object);
+        (new IndexBuilder($env['store']))->rebuild();
+
+        foreach (['Like', 'Announce'] as $type) {
+            $this->receive($env, [
+                'id' => 'https://remote.test/a/' . strtolower($type) . '-' . $iteration,
+                'type' => $type,
+                'actor' => $env['remote_actor'],
+                'object' => $object['id'],
+                'published' => gmdate('c'),
+            ]);
+        }
+
+        (new InboxWorker($env['store'], $env['queue']))->run(10);
+        $interactions = new InteractionService(
+            $env['store'],
+            new LocalUsers($env['store'], $env['config']),
+            $env['queue'],
+            new SocialGraph($env['store']),
+            new ActorRepository($env['store']),
+            $env['config'],
+        );
+        $counts = $interactions->counts($object);
+
+        $this->check('incoming like accepted without moderation', ($counts['likes'] ?? 0) === 1);
+        $this->check('incoming announce accepted without moderation', ($counts['boosts'] ?? 0) === 1);
     }
 
     private function environment(string $name): array
