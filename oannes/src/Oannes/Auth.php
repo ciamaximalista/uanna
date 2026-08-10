@@ -21,7 +21,11 @@ final class Auth
 
             session_save_path('0;0660;' . $sessionDir);
             session_name('OANNESSESSID');
-            session_start();
+            if (!@session_start()) {
+                session_id(bin2hex(random_bytes(16)));
+                $_SESSION = [];
+                session_start();
+            }
 
             $sessionFile = $sessionDir . '/sess_' . session_id();
             if (is_file($sessionFile)) {
