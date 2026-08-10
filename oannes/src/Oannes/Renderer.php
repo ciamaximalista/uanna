@@ -522,7 +522,7 @@ final class Renderer
         $childrenHtml = $this->childrenHtml($children, $actions);
         $ownActions = $this->ownPostActions($object, $actions);
         $actionHtml = $this->actionBar($id, $interactionActors, $actions, $ownActions);
-        $visibilityBadge = ActivityPub::isPublicObject($object) ? '' : '<span class="visibility-badge private">Privado</span>';
+        $visibilityBadge = $this->visibilityBadge($object);
 
         $boostHtml = $boostedAt !== '' ? '<p class="boost-marker">Impulsado <time datetime="' . Html::escape($boostedAt) . '">' . Html::escape($boostedHuman) . '</time></p>' : '';
 
@@ -535,6 +535,21 @@ final class Renderer
             . $actionHtml
             . $childrenHtml
             . '</article>';
+    }
+
+    private function visibilityBadge(array $object): string
+    {
+        if (ActivityPub::isPublicObject($object)) {
+            return '';
+        }
+
+        foreach (ActivityPub::audience($object) as $target) {
+            if (str_ends_with($target, '/followers')) {
+                return '<span class="visibility-badge followers">Sólo para seguidores</span>';
+            }
+        }
+
+        return '<span class="visibility-badge private">Privado</span>';
     }
 
     private function actionBar(string $id, array $interactionActors, ?array $actions, string $ownActions = ''): string
