@@ -238,6 +238,7 @@ La regla recomendada es:
 - El usuario que ejecuta PHP debe poder leer y escribir `oannes/data`, `user` y `oannes/public/assets`.
 - Todos esos directorios deben tener setgid (`2775`) para que los archivos nuevos hereden el grupo correcto.
 - Los archivos deben quedar en `0664` y los directorios en `2775`.
+- Las sesiones de `oannes/data/sessions` deben ser escribibles por el mismo grupo; Uanna intenta crearlas como `0660`.
 - Si se ejecutan comandos desde consola, el usuario shell debe pertenecer al mismo grupo que PHP.
 - No deben mezclarse propietarios incompatibles como `david` y `nobody` si el grupo no tiene escritura.
 

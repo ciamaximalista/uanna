@@ -17,9 +17,16 @@ final class Auth
                 mkdir($sessionDir, 0775, true);
             }
 
-            session_save_path($sessionDir);
+            @chmod($sessionDir, 02775);
+
+            session_save_path('0;0660;' . $sessionDir);
             session_name('OANNESSESSID');
             session_start();
+
+            $sessionFile = $sessionDir . '/sess_' . session_id();
+            if (is_file($sessionFile)) {
+                @chmod($sessionFile, 0660);
+            }
         }
     }
 
