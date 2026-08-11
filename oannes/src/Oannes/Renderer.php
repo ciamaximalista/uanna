@@ -320,7 +320,7 @@ final class Renderer
         $actorId = trim($actorId);
         $actor = $actorId !== '' ? $this->actors->findById($actorId) : null;
 
-        if ($actorId === '' || $actor === null) {
+        if ($actorId === '' || $actor === null || $this->actorBlocked($actorId)) {
             http_response_code(404);
             return $this->page('No encontrado', '<h1>No encontrado</h1>');
         }
@@ -452,7 +452,7 @@ final class Renderer
 
             $seen[$parent] = true;
             $parentObject = $this->repo->findByIdOrAlias($parent);
-            if ($parentObject === null || !ActivityPub::isPublicObject($parentObject)) {
+            if ($parentObject === null || !ActivityPub::isPublicObject($parentObject) || $this->objectBlocked($parentObject)) {
                 break;
             }
 
@@ -475,7 +475,7 @@ final class Renderer
     {
         $object = $this->repo->findByIdOrAlias($id);
 
-        if ($object === null || !ActivityPub::isPublicObject($object)) {
+        if ($object === null || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
             http_response_code(404);
             return $this->page('No encontrado', '<h1>No encontrado</h1>');
         }
@@ -509,6 +509,10 @@ final class Renderer
 
     private function objectCard(array $object, bool $child, array $options = []): string
     {
+        if ($this->objectBlocked($object)) {
+            return '';
+        }
+
         $id = ActivityPub::objectId($object) ?? '';
         $actor = ActivityPub::attributedTo($object) ?? '';
         $actorInfo = $this->actorInfo($actor);
@@ -853,7 +857,7 @@ final class Renderer
                 }
 
                 $parentObject = $this->repo->findByIdOrAlias($parent);
-                if ($parentObject !== null) {
+                if ($parentObject !== null && !$this->objectBlocked($parentObject)) {
                     $parentId = ActivityPub::objectId($parentObject);
                     if ($parentId !== null && !isset($byId[$parentId])) {
                         $byId[$parentId] = $parentObject;
@@ -941,7 +945,7 @@ final class Renderer
         $all = [];
 
         foreach ($this->repo->childrenOf($id) as $child) {
-            if (!ActivityPub::isPublicObject($child)) {
+            if (!ActivityPub::isPublicObject($child) || $this->objectBlocked($child)) {
                 continue;
             }
 
@@ -979,7 +983,18 @@ final class Renderer
 
     private function publicObjects(array $objects): array
     {
-        return array_values(array_filter($objects, static fn (array $object): bool => ActivityPub::isPublicObject($object)));
+        return array_values(array_filter($objects, fn (array $object): bool => ActivityPub::isPublicObject($object) && !$this->objectBlocked($object)));
+    }
+
+    private function objectBlocked(array $object): bool
+    {
+        $actor = ActivityPub::attributedTo($object);
+        return $actor !== null && $this->actorBlocked($actor);
+    }
+
+    private function actorBlocked(string $actorId): bool
+    {
+        return (new InstanceSettings(new FileStore($this->config['data_dir']), $this->config))->isActorBlocked($actorId);
     }
 
     private function instancePresentationCard(InstanceSettings $settings): string

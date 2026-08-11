@@ -311,7 +311,7 @@ final class Router
             $format = $_GET['format'] ?? '';
             if ($format === 'xml') {
                 $object = $this->repo->findByIdOrAlias($id);
-                if ($object === null || !ActivityPub::isPublicObject($object)) {
+                if ($object === null || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
                     Http::notFound();
                     return;
                 }
@@ -323,7 +323,7 @@ final class Router
 
             if (Http::wantsActivityJson()) {
                 $object = $this->repo->findByIdOrAlias($id);
-                if ($object === null || !ActivityPub::isPublicObject($object)) {
+                if ($object === null || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
                     Http::notFound();
                     return;
                 }
@@ -494,7 +494,7 @@ final class Router
 
     private function publicObjects(array $objects): array
     {
-        return array_values(array_filter($objects, static fn (array $object): bool => ActivityPub::isPublicObject($object)));
+        return array_values(array_filter($objects, fn (array $object): bool => ActivityPub::isPublicObject($object) && !$this->objectBlocked($object)));
     }
 
     private function inbox(string $uid, string $method): void
@@ -787,6 +787,16 @@ final class Router
                 return;
             }
 
+            if ($action === 'purge') {
+                if (!$settings->isActorBlocked($actor)) {
+                    throw new \RuntimeException('Sólo se puede purgar contenido de usuarios bloqueados en todo el servidor.');
+                }
+
+                $deleted = $this->purgeActorObjects($actor);
+                $this->instanceAdmin('Contenido purgado: ' . $deleted . ' publicaciones.');
+                return;
+            }
+
             if ($actor === '' && $query !== '') {
                 $resolved = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($query);
                 $actor = ActivityPub::objectId($resolved) ?? '';
@@ -799,6 +809,38 @@ final class Router
         }
 
         $this->instanceAdmin('Usuario bloqueado en todo el servidor.');
+    }
+
+    private function purgeActorObjects(string $actorId): int
+    {
+        if ($actorId === '') {
+            throw new \RuntimeException('Actor no válido.');
+        }
+
+        $deleted = 0;
+        foreach ($this->store->objectFiles() as $file) {
+            try {
+                $object = $this->store->readJson($file);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if (ActivityPub::attributedTo($object) !== $actorId) {
+                continue;
+            }
+
+            $id = ActivityPub::objectId($object);
+            if ($id !== null) {
+                $this->store->deleteObject($id);
+                $deleted++;
+            }
+        }
+
+        if ($deleted > 0) {
+            (new IndexBuilder($this->store))->rebuild();
+        }
+
+        return $deleted;
     }
 
     private function instanceAdminUsers(string $method): void
@@ -1940,6 +1982,10 @@ final class Router
 
     private function objectVisibleInUserTimeline(string $uid, array $object): bool
     {
+        if ($this->objectBlocked($object)) {
+            return false;
+        }
+
         if (ActivityPub::isPublicObject($object)) {
             return true;
         }
@@ -1959,6 +2005,17 @@ final class Router
         }
 
         return ActivityPub::attributedTo($object) === $this->users->actorId($uid);
+    }
+
+    private function objectBlocked(array $object): bool
+    {
+        $actor = ActivityPub::attributedTo($object);
+        return $actor !== null && $this->actorBlocked($actor);
+    }
+
+    private function actorBlocked(string $actorId): bool
+    {
+        return (new InstanceSettings($this->store, $this->config))->isActorBlocked($actorId);
     }
 
     private function latestNotifications(string $uid, int $limit = 12): array

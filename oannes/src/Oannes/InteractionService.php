@@ -24,6 +24,11 @@ final class InteractionService
 
         if ($id !== '') {
             foreach ($this->storedInteractionsFor($id) as $interaction) {
+                $actor = is_string($interaction['actor'] ?? null) ? $interaction['actor'] : '';
+                if ($actor !== '' && $this->actorBlocked($actor)) {
+                    continue;
+                }
+
                 $type = $interaction['type'] ?? '';
                 if ($type === 'Like') {
                     $likes++;
@@ -59,6 +64,10 @@ final class InteractionService
                 continue;
             }
 
+            if ($this->actorBlocked($actor)) {
+                continue;
+            }
+
             if ($type === 'Like') {
                 $actors['likes'][] = $actor;
             } elseif ($type === 'Announce') {
@@ -85,7 +94,7 @@ final class InteractionService
             }
 
             $object = $repo->findByIdOrAlias($activity['object']);
-            if ($object === null) {
+            if ($object === null || $this->objectBlocked($object)) {
                 continue;
             }
 
@@ -117,12 +126,12 @@ final class InteractionService
             $activity = $this->readJsonFile($file);
             $actor = $activity['actor'] ?? null;
 
-            if (($activity['type'] ?? null) !== 'Announce' || !is_string($activity['object'] ?? null) || !is_string($actor) || !isset($followed[$actor])) {
+            if (($activity['type'] ?? null) !== 'Announce' || !is_string($activity['object'] ?? null) || !is_string($actor) || !isset($followed[$actor]) || $this->actorBlocked($actor)) {
                 continue;
             }
 
             $object = $repo->findByIdOrAlias($activity['object']);
-            if ($object === null) {
+            if ($object === null || $this->objectBlocked($object)) {
                 continue;
             }
 
@@ -291,6 +300,17 @@ final class InteractionService
         return 0;
     }
 
+    private function objectBlocked(array $object): bool
+    {
+        $actor = ActivityPub::attributedTo($object);
+        return $actor !== null && $this->actorBlocked($actor);
+    }
+
+    private function actorBlocked(string $actorId): bool
+    {
+        return $actorId !== '' && (new InstanceSettings($this->store, $this->config))->isActorBlocked($actorId);
+    }
+
     private function storedInteractionsFor(string $objectId): array
     {
         $this->storedInteractionsByObject ??= $this->storedInteractionsIndex();
@@ -305,8 +325,9 @@ final class InteractionService
             $record = $this->readJsonFile($file);
             $activity = is_array($record['msg'] ?? null) ? $record['msg'] : $record;
             $target = $record['objid'] ?? $activity['object'] ?? null;
+            $actor = is_string($activity['actor'] ?? null) ? $activity['actor'] : '';
 
-            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
+            if (is_string($target) && !$this->actorBlocked($actor) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
                 $items[$target][] = $activity;
             }
         }
@@ -314,8 +335,9 @@ final class InteractionService
         foreach (glob($this->store->dataDir() . '/interactions/local/*/*.json') ?: [] as $file) {
             $activity = $this->readJsonFile($file);
             $target = $activity['object'] ?? null;
+            $actor = is_string($activity['actor'] ?? null) ? $activity['actor'] : '';
 
-            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
+            if (is_string($target) && !$this->actorBlocked($actor) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
                 $items[$target][] = $activity;
             }
         }
@@ -323,8 +345,9 @@ final class InteractionService
         foreach (glob($this->store->dataDir() . '/interactions/remote/*/*.json') ?: [] as $file) {
             $activity = $this->readJsonFile($file);
             $target = $activity['object'] ?? null;
+            $actor = is_string($activity['actor'] ?? null) ? $activity['actor'] : '';
 
-            if (is_string($target) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
+            if (is_string($target) && !$this->actorBlocked($actor) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
                 $items[$target][] = $activity;
             }
         }

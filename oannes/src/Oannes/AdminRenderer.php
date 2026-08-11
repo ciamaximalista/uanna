@@ -138,9 +138,9 @@ final class AdminRenderer
                 $blockedUsersHtml .= '<article class="actor-row"><span>' . $this->actorLink((string)$actor) . '</span>'
                     . '<form method="post" action="?route=instance-admin/actor-block" class="actor-actions">'
                     . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
-                    . '<input type="hidden" name="action" value="delete"/>'
                     . '<input type="hidden" name="actor" value="' . Html::escape((string)$actor) . '"/>'
-                    . '<button type="submit">Quitar bloqueo</button></form></article>';
+                    . '<button type="submit" name="action" value="delete">Quitar bloqueo</button>'
+                    . '<button type="submit" name="action" value="purge" class="danger">Purgar contenido</button></form></article>';
             }
             $blockedUsersHtml .= '</div>';
         }
