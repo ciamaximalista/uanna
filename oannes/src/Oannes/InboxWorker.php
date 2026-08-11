@@ -277,16 +277,93 @@ final class InboxWorker
 
         $type = ActivityPub::objectType($activity);
         $actor = ActivityPub::attributedTo($activity);
-        $object = $activity['object'] ?? null;
+        $objectValue = $activity['object'] ?? null;
+        $object = is_string($objectValue) ? $objectValue : (is_array($objectValue) ? ActivityPub::objectId($objectValue) : null);
 
         if (!in_array($type, ['Like', 'Announce'], true) || $actor === null || !is_string($object) || $object === '') {
             return false;
         }
 
+        if ($type === 'Announce' && (new SocialGraph($this->store))->isFollowing($localUid, $actor)) {
+            $this->cacheAnnouncedObject($localUid, $objectValue, $object);
+        }
+
+        $activity['object'] = $object;
         $this->store->writeJson($this->remoteInteractionPath($localUid, $actor, $type, $object), $activity);
         $this->writeNotification($localUid, $type, $actor, $object, ActivityPub::published($activity));
 
         return true;
+    }
+
+    private function cacheAnnouncedObject(string $localUid, mixed $objectValue, string $objectId): void
+    {
+        $object = is_array($objectValue) ? $objectValue : null;
+
+        if ($object === null) {
+            $existing = (new ObjectRepository($this->store))->findByIdOrAlias($objectId);
+            if ($existing !== null) {
+                $this->storeAcceptedObject($localUid, $existing);
+                return;
+            }
+
+            $object = $this->fetchRemoteObject($objectId);
+        }
+
+        if ($object === null || !in_array(ActivityPub::objectType($object), ['Note', 'Article', 'Page', 'Question'], true)) {
+            return;
+        }
+
+        if (ActivityPub::objectId($object) === null) {
+            return;
+        }
+
+        $this->storeAcceptedObject($localUid, $object);
+        $this->cacheObjectActor($object);
+    }
+
+    private function fetchRemoteObject(string $url): ?array
+    {
+        if (!str_starts_with($url, 'https://')) {
+            return null;
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => "Accept: application/activity+json, application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\", application/json\r\nUser-Agent: Uanna/0.1\r\n",
+                'ignore_errors' => true,
+                'timeout' => 15,
+            ],
+        ]);
+        $body = @file_get_contents($url, false, $context);
+        if ($body === false || $body === '') {
+            return null;
+        }
+
+        try {
+            $object = Json::decode($body, $url);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $object;
+    }
+
+    private function cacheObjectActor(array $object): void
+    {
+        $actorId = ActivityPub::attributedTo($object);
+        if ($actorId === null || !str_starts_with($actorId, 'https://')) {
+            return;
+        }
+
+        if ((new ActorRepository($this->store))->findById($actorId) !== null) {
+            return;
+        }
+
+        $actor = $this->fetchRemoteObject($actorId);
+        if ($actor !== null && ActivityPub::isActor($actor)) {
+            $this->store->writeActor($actor);
+        }
     }
 
     private function acceptUpdate(string $localUid, string $actorId, array $activity): bool

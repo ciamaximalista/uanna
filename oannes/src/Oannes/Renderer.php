@@ -224,9 +224,12 @@ final class Renderer
         }
 
         $csrf = Html::escape($auth->csrfToken());
+        $reloadUrl = Html::escape($this->reloadUrl());
+        $reloadIcon = '<svg aria-hidden="true" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
 
         return [
-            'button' => '<a class="compose-trigger" href="#compose-modal" aria-label="Publicar">+</a>',
+            'button' => '<a class="compose-trigger" href="#compose-modal" aria-label="Publicar">+</a>'
+                . '<a class="reload-trigger" href="' . $reloadUrl . '" aria-label="Recargar" title="Recargar">' . $reloadIcon . '</a>',
             'modal' => '<section id="compose-modal" class="modal-overlay" aria-label="Publicar">'
                 . '<a class="modal-backdrop" href="#" aria-label="Cerrar"></a>'
                 . '<article class="compose-modal">'
@@ -243,6 +246,16 @@ final class Renderer
                 . '</article>'
                 . '</section>',
         ];
+    }
+
+    private function reloadUrl(): string
+    {
+        $uri = (string)($_SERVER['REQUEST_URI'] ?? $this->publicUrl());
+        if ($uri === '' || str_contains($uri, "\r") || str_contains($uri, "\n") || str_starts_with($uri, '//')) {
+            return $this->publicUrl();
+        }
+
+        return $uri;
     }
 
     public function home(): string
@@ -502,7 +515,9 @@ final class Renderer
         $published = ActivityPub::published($object);
         $publishedHuman = DateFormat::human($published, (string)($this->config['timezone'] ?? 'Europe/Madrid'));
         $content = $this->contentFor($object);
+        $attachments = $this->attachmentHtml($object);
         $boostedAt = is_string($object['_oannes_boosted_at'] ?? null) ? $object['_oannes_boosted_at'] : '';
+        $boostedBy = is_string($object['_oannes_boosted_by'] ?? null) ? $object['_oannes_boosted_by'] : '';
         $boostedHuman = DateFormat::human($boostedAt, (string)($this->config['timezone'] ?? 'Europe/Madrid'));
         $class = $child ? 'object child' : 'object';
         $anchor = $id !== '' ? $this->postAnchor($id) : '';
@@ -524,7 +539,7 @@ final class Renderer
         $actionHtml = $this->actionBar($id, $interactionActors, $actions, $ownActions);
         $visibilityBadge = $this->visibilityBadge($object);
 
-        $boostHtml = $boostedAt !== '' ? '<p class="boost-marker">Impulsado <time datetime="' . Html::escape($boostedAt) . '">' . Html::escape($boostedHuman) . '</time></p>' : '';
+        $boostHtml = $boostedAt !== '' ? $this->boostMarker($boostedBy, $boostedAt, $boostedHuman) : '';
 
         return '<article class="' . $class . '"' . $anchorAttr . '>'
             . $boostHtml
@@ -532,9 +547,108 @@ final class Renderer
             . '<p class="meta post-meta">' . $actorNameHtml . '<br/>'
             . '<a href="' . Html::escape($url) . '"><time datetime="' . Html::escape($published) . '">' . Html::escape($publishedHuman) . '</time></a>' . $visibilityBadge . '</p></div></header>'
             . '<div class="content">' . $content . '</div>'
+            . $attachments
             . $actionHtml
             . $childrenHtml
             . '</article>';
+    }
+
+    private function attachmentHtml(array $object): string
+    {
+        $attachments = $object['attachment'] ?? [];
+        $attachments = is_array($attachments) && array_is_list($attachments) ? $attachments : [$attachments];
+        $html = '';
+
+        foreach ($attachments as $attachment) {
+            if (!is_array($attachment)) {
+                continue;
+            }
+
+            $mediaType = is_string($attachment['mediaType'] ?? null) ? strtolower($attachment['mediaType']) : '';
+            if (!str_starts_with($mediaType, 'image/')) {
+                continue;
+            }
+
+            $url = $this->attachmentUrl($attachment);
+            if ($url === '') {
+                continue;
+            }
+
+            $alt = '';
+            foreach (['name', 'summary'] as $field) {
+                if (is_string($attachment[$field] ?? null) && trim($attachment[$field]) !== '') {
+                    $alt = trim($attachment[$field]);
+                    break;
+                }
+            }
+
+            $safeUrl = Html::escape($url);
+            $html .= '<figure class="post-attachment">'
+                . '<a href="' . $safeUrl . '" target="_blank" rel="noopener">'
+                . '<img src="' . $safeUrl . '" alt="' . Html::escape($alt) . '" loading="lazy"/>'
+                . '</a>'
+                . ($alt !== '' ? '<figcaption>' . Html::escape($alt) . '</figcaption>' : '')
+                . '</figure>';
+        }
+
+        return $html !== '' ? '<div class="post-attachments">' . $html . '</div>' : '';
+    }
+
+    private function attachmentUrl(array $attachment): string
+    {
+        $url = $attachment['url'] ?? $attachment['href'] ?? null;
+        if (is_string($url) && $url !== '') {
+            return $url;
+        }
+
+        if (is_array($url)) {
+            foreach ($url as $item) {
+                if (is_string($item) && $item !== '') {
+                    return $item;
+                }
+
+                if (is_array($item) && is_string($item['href'] ?? null) && $item['href'] !== '') {
+                    return $item['href'];
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function boostMarker(string $actorId, string $boostedAt, string $boostedHuman): string
+    {
+        $info = $this->actorInfo($actorId);
+        $url = Html::escape((string)($info['internal_url'] ?? $info['url'] ?? '#'));
+        $label = Html::escape($this->actorHandleLabel($actorId, $info));
+        $avatar = Html::escape((string)($info['avatar'] ?? ''));
+        $initial = Html::escape((string)($info['initial'] ?? '?'));
+        $avatarHtml = $avatar !== ''
+            ? '<img class="boost-avatar" src="' . $avatar . '" alt=""/>'
+            : '<span class="boost-avatar avatar-fallback">' . $initial . '</span>';
+
+        return '<p class="boost-marker">'
+            . '<span>Impulsado por <a href="' . $url . '">' . $label . '</a></span> '
+            . '<time datetime="' . Html::escape($boostedAt) . '">' . Html::escape($boostedHuman) . '</time> '
+            . '<a class="boost-avatar-link" href="' . $url . '" aria-label="' . $label . '">' . $avatarHtml . '</a>'
+            . '</p>';
+    }
+
+    private function actorHandleLabel(string $actorId, array $info): string
+    {
+        $host = parse_url($actorId, PHP_URL_HOST);
+        if (is_string($host) && $host !== '') {
+            $actor = $this->actors->findById($actorId);
+            $preferred = is_array($actor) && is_string($actor['preferredUsername'] ?? null)
+                ? $actor['preferredUsername']
+                : '';
+
+            if ($preferred !== '') {
+                return '@' . $preferred . '@' . $host;
+            }
+        }
+
+        return (string)($info['label'] ?? $actorId);
     }
 
     private function visibilityBadge(array $object): string

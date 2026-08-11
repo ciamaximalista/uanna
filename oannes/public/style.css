@@ -165,7 +165,8 @@ a {
     background: var(--panel);
 }
 
-.compose-trigger {
+.compose-trigger,
+.reload-trigger {
     display: inline-grid;
     place-items: center;
     width: 2.35rem;
@@ -180,8 +181,18 @@ a {
     line-height: 1;
 }
 
+.reload-trigger {
+    font-size: 1rem;
+}
+
+.reload-trigger svg {
+    display: block;
+}
+
 .compose-trigger:hover,
-.compose-trigger:focus-visible {
+.compose-trigger:focus-visible,
+.reload-trigger:hover,
+.reload-trigger:focus-visible {
     background: var(--accent-strong);
 }
 
@@ -478,10 +489,51 @@ h3 {
 }
 
 .boost-marker {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
     margin: 0 0 0.75rem;
     color: var(--accent-strong);
     font-size: 0.82rem;
     font-weight: 700;
+}
+
+.boost-marker a {
+    color: var(--accent-strong);
+    text-decoration: none;
+}
+
+.boost-marker a:hover,
+.boost-marker a:focus-visible {
+    text-decoration: underline;
+}
+
+.boost-avatar-link {
+    display: inline-grid;
+    place-items: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    flex: 0 0 1.35rem;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+.boost-avatar {
+    width: 1.35rem;
+    height: 1.35rem;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    object-fit: cover;
+    background: var(--surface);
+}
+
+.boost-avatar.avatar-fallback {
+    display: grid;
+    place-items: center;
+    color: var(--accent-strong);
+    font-size: 0.68rem;
+    font-weight: 800;
 }
 
 .post-meta a {
@@ -514,6 +566,41 @@ h3 {
     border-color: #d6b25e;
     background: #fff6d8;
     color: #7a5512;
+}
+
+.post-attachments {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 0.8rem;
+}
+
+.post-attachment {
+    margin: 0;
+    min-width: 0;
+}
+
+.post-attachment a {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.post-attachment img {
+    display: block;
+    width: 100%;
+    max-height: 34rem;
+    object-fit: contain;
+    background: #050707;
+}
+
+.post-attachment figcaption {
+    margin-top: 0.4rem;
+    color: var(--muted);
+    font-size: 0.84rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 .instance-presentation {
@@ -1338,7 +1425,8 @@ main > *,
         padding: 0.45rem 0.55rem;
     }
 
-    .compose-trigger {
+    .compose-trigger,
+    .reload-trigger {
         width: 2.25rem;
         height: 2.25rem;
     }

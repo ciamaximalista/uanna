@@ -102,6 +102,43 @@ final class InteractionService
         return array_slice($objects, 0, $limit);
     }
 
+    public function remoteBoostedObjectsForUser(string $uid, array $actorIds, int $limit = 50): array
+    {
+        $actorIds = array_values(array_unique(array_filter($actorIds, 'is_string')));
+        if ($actorIds === []) {
+            return [];
+        }
+
+        $followed = array_fill_keys($actorIds, true);
+        $objects = [];
+        $repo = new ObjectRepository($this->store);
+
+        foreach (glob($this->store->dataDir() . '/interactions/remote/' . rawurlencode($uid) . '/*.json') ?: [] as $file) {
+            $activity = $this->readJsonFile($file);
+            $actor = $activity['actor'] ?? null;
+
+            if (($activity['type'] ?? null) !== 'Announce' || !is_string($activity['object'] ?? null) || !is_string($actor) || !isset($followed[$actor])) {
+                continue;
+            }
+
+            $object = $repo->findByIdOrAlias($activity['object']);
+            if ($object === null) {
+                continue;
+            }
+
+            $object['_oannes_boosted_at'] = is_string($activity['published'] ?? null) ? $activity['published'] : ActivityPub::published($object);
+            $object['_oannes_boosted_by'] = $actor;
+            $objects[] = $object;
+        }
+
+        usort($objects, static fn (array $a, array $b): int => strcmp(
+            (string)($b['_oannes_boosted_at'] ?? ActivityPub::published($b)),
+            (string)($a['_oannes_boosted_at'] ?? ActivityPub::published($a))
+        ));
+
+        return array_slice($objects, 0, $limit);
+    }
+
     public function hasLocalReaction(string $uid, string $objectId, string $type): bool
     {
         if (!in_array($type, ['Like', 'Announce'], true)) {

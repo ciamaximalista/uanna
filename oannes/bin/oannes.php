@@ -22,6 +22,7 @@ use Oannes\PostService;
 use Oannes\ReadinessReport;
 use Oannes\SocialGraph;
 use Oannes\ActorRepository;
+use Oannes\ActivityPub;
 
 require dirname(__DIR__) . '/src/Oannes/Autoload.php';
 Autoload::register();
@@ -50,6 +51,7 @@ try {
         'post-note' => post_note($store, $config, $argv[2] ?? null, $argv[3] ?? null),
         'simulate' => simulate($argv[2] ?? null),
         'readiness' => readiness($store, $config, $argv[2] ?? null),
+        'backfill-boosts' => backfill_boosts($store, $config, $argv[2] ?? null),
         default => [
             'usage' => [
                 'php oannes/bin/oannes.php analyse-snac /path/to/snac',
@@ -70,6 +72,7 @@ try {
                 'php oannes/bin/oannes.php post-note <uid> <text>',
                 'php oannes/bin/oannes.php simulate [iterations]',
                 'php oannes/bin/oannes.php readiness [simulation-iterations]',
+                'php oannes/bin/oannes.php backfill-boosts [limit]',
             ],
         ],
     };
@@ -98,6 +101,124 @@ function inbox_run(FileStore $store, ?string $limitArg): array
     $limit = $limitArg !== null && $limitArg !== '' ? (int)$limitArg : 25;
 
     return (new InboxWorker($store, new FileQueue($store)))->run(max(1, $limit));
+}
+
+function backfill_boosts(FileStore $store, array $config, ?string $limitArg): array
+{
+    $limit = $limitArg !== null && $limitArg !== '' ? max(1, (int)$limitArg) : 25;
+    $repo = new ObjectRepository($store);
+    $graph = new SocialGraph($store);
+    $stored = 0;
+    $actors = 0;
+    $skipped = 0;
+    $failed = 0;
+
+    foreach (glob($store->dataDir() . '/interactions/remote/*/*.json') ?: [] as $file) {
+        if ($stored >= $limit) {
+            break;
+        }
+
+        try {
+            $activity = $store->readJson($file);
+        } catch (Throwable) {
+            $failed++;
+            continue;
+        }
+
+        $uid = rawurldecode(basename(dirname($file)));
+        $actor = $activity['actor'] ?? null;
+        $objectId = $activity['object'] ?? null;
+
+        if (($activity['type'] ?? null) !== 'Announce' || !is_string($actor) || !is_string($objectId) || $objectId === '') {
+            $skipped++;
+            continue;
+        }
+
+        if (!$graph->isFollowing($uid, $actor)) {
+            $skipped++;
+            continue;
+        }
+
+        $object = $repo->findByIdOrAlias($objectId);
+        if ($object !== null) {
+            if (backfill_object_actor($store, $object)) {
+                $actors++;
+            }
+            $skipped++;
+            continue;
+        }
+
+        $object = fetch_remote_ap_object($objectId);
+        if ($object === null || !in_array(ActivityPub::objectType($object), ['Note', 'Article', 'Page', 'Question'], true) || ActivityPub::objectId($object) === null) {
+            $failed++;
+            continue;
+        }
+
+        $object['_oannes_inbox_uids'] = [$uid];
+        $store->writeObject($object);
+        if (backfill_object_actor($store, $object)) {
+            $actors++;
+        }
+        $stored++;
+    }
+
+    if ($stored > 0) {
+        (new IndexBuilder($store))->rebuild();
+    }
+
+    return [
+        'stored' => $stored,
+        'actors' => $actors,
+        'skipped' => $skipped,
+        'failed' => $failed,
+        'limit' => $limit,
+    ];
+}
+
+function backfill_object_actor(FileStore $store, array $object): bool
+{
+    $actorId = ActivityPub::attributedTo($object);
+    if ($actorId === null || !str_starts_with($actorId, 'https://')) {
+        return false;
+    }
+
+    if ((new ActorRepository($store))->findById($actorId) !== null) {
+        return false;
+    }
+
+    $actor = fetch_remote_ap_object($actorId);
+    if ($actor === null || !ActivityPub::isActor($actor)) {
+        return false;
+    }
+
+    $store->writeActor($actor);
+    return true;
+}
+
+function fetch_remote_ap_object(string $url): ?array
+{
+    if (!str_starts_with($url, 'https://')) {
+        return null;
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "Accept: application/activity+json, application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\", application/json\r\nUser-Agent: Uanna/0.1\r\n",
+            'ignore_errors' => true,
+            'timeout' => 15,
+        ],
+    ]);
+    $body = @file_get_contents($url, false, $context);
+    if ($body === false || $body === '') {
+        return null;
+    }
+
+    try {
+        return Oannes\Json::decode($body, $url);
+    } catch (Throwable) {
+        return null;
+    }
 }
 
 function moderation_list(FileStore $store, array $config, ?string $uid, ?string $kind): array

@@ -211,6 +211,7 @@ php oannes/bin/oannes.php validate-threads
 php oannes/bin/oannes.php queue-list
 php oannes/bin/oannes.php auth-audit
 php oannes/bin/oannes.php readiness 20
+php oannes/bin/oannes.php backfill-boosts 50
 ```
 
 ## Exportacion e importacion de usuarios

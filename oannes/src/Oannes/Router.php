@@ -1792,6 +1792,7 @@ final class Router
         $graph = new SocialGraph($this->store);
         $relations = new SocialRelationService($this->store);
         $actorIds = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
+        $followedActorIds = [];
 
         foreach ($graph->following($uid) as $actor) {
             $actorId = ActivityPub::objectId($actor);
@@ -1802,6 +1803,7 @@ final class Router
                 }
 
                 $actorIds[] = $actorId;
+                $followedActorIds[] = $actorId;
                 $localFollowedUid = $this->localUidForActorId($actorId);
                 if ($localFollowedUid !== null) {
                     $actorIds[] = $this->users->actorId($localFollowedUid);
@@ -1810,10 +1812,29 @@ final class Router
             }
         }
 
-        return array_values(array_filter(
+        $interactions = new InteractionService(
+            $this->store,
+            $this->users,
+            new FileQueue($this->store),
+            $graph,
+            new ActorRepository($this->store),
+            $this->config,
+        );
+        $objects = array_merge(
             $this->repo->byAnyActor(array_values(array_unique($actorIds)), 80),
+            $interactions->remoteBoostedObjectsForUser($uid, $followedActorIds, 80)
+        );
+        $objects = array_values(array_filter(
+            $objects,
             fn (array $object): bool => $this->objectVisibleInUserTimeline($uid, $object)
         ));
+
+        usort($objects, static fn (array $a, array $b): int => strcmp(
+            (string)($b['_oannes_boosted_at'] ?? ActivityPub::published($b)),
+            (string)($a['_oannes_boosted_at'] ?? ActivityPub::published($a))
+        ));
+
+        return array_slice($objects, 0, 80);
     }
 
     private function refreshTimelineInbox(): void

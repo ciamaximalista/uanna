@@ -17,6 +17,7 @@ final class SimulationRunner
             $this->scenarioFollowReject($i);
             $this->scenarioCreateModeration($i);
             $this->scenarioInteractionAccept($i);
+            $this->scenarioRemoteBoostFromFollowed($i);
             $this->scenarioReplyMentionAnnounce($i);
             $this->scenarioLocalUserAutoFollow($i);
             $this->scenarioAdminSocializeUser($i);
@@ -385,6 +386,45 @@ final class SimulationRunner
 
         $this->check('incoming like accepted without moderation', ($counts['likes'] ?? 0) === 1);
         $this->check('incoming announce accepted without moderation', ($counts['boosts'] ?? 0) === 1);
+    }
+
+    private function scenarioRemoteBoostFromFollowed(int $iteration): void
+    {
+        $env = $this->environment('remote-boost-' . $iteration);
+        $graph = new SocialGraph($env['store']);
+        $graph->addFollowing('ana', $env['remote']);
+
+        $thirdParty = [
+            'id' => 'https://third.test/posts/' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => 'https://third.test/users/mara',
+            'published' => gmdate('c'),
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'Boosted third-party object',
+        ];
+
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/boost-third-' . $iteration,
+            'type' => 'Announce',
+            'actor' => $env['remote_actor'],
+            'object' => $thirdParty,
+            'published' => gmdate('c'),
+        ]);
+
+        (new InboxWorker($env['store'], $env['queue']))->run(10);
+        $repo = new ObjectRepository($env['store']);
+        $interactions = new InteractionService(
+            $env['store'],
+            new LocalUsers($env['store'], $env['config']),
+            $env['queue'],
+            $graph,
+            new ActorRepository($env['store']),
+            $env['config'],
+        );
+        $boosts = $interactions->remoteBoostedObjectsForUser('ana', [$env['remote_actor']], 10);
+
+        $this->check('followed remote boost caches third-party object', $repo->findByIdOrAlias($thirdParty['id']) !== null);
+        $this->check('followed remote boost appears in user boost feed', count($boosts) === 1 && ($boosts[0]['id'] ?? null) === $thirdParty['id']);
     }
 
     private function scenarioReplyMentionAnnounce(int $iteration): void
