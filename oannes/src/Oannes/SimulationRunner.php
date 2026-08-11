@@ -19,6 +19,7 @@ final class SimulationRunner
             $this->scenarioInteractionAccept($i);
             $this->scenarioRemoteBoostFromFollowed($i);
             $this->scenarioReplyMentionAnnounce($i);
+            $this->scenarioCanonicalReplyTarget($i);
             $this->scenarioLocalUserAutoFollow($i);
             $this->scenarioAdminSocializeUser($i);
             $this->scenarioUserArchive($i);
@@ -173,6 +174,44 @@ final class SimulationRunner
         $this->check('post note creates id', is_string($note['id'] ?? null));
         $this->check('dry-run skips delivery', ($stats['skipped'] ?? 0) === 1 && ($stats['delivered'] ?? 1) === 0);
         $this->check('dry-run keeps job pending', count($pending) === 1);
+    }
+
+    private function scenarioCanonicalReplyTarget(int $iteration): void
+    {
+        $env = $this->environment('canonical-reply-' . $iteration);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $graph = new SocialGraph($env['store']);
+        $service = new PostService($env['store'], $users, $env['queue'], $graph, $env['config']);
+        $remote = [
+            'id' => 'https://remote.test/ap/objects/canonical-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => $env['remote_actor'],
+            'published' => gmdate('c'),
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'url' => 'https://remote.test/posts/canonical-' . $iteration,
+            'content' => 'Canonical parent',
+        ];
+        $announce = [
+            'id' => 'https://relay.test/activities/announce-' . $iteration,
+            'type' => 'Announce',
+            'actor' => 'https://relay.test/actor',
+            'object' => $remote['url'],
+            'published' => gmdate('c'),
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+        ];
+        $env['store']->writeObject($remote);
+        $env['store']->writeObject($announce);
+        (new IndexBuilder($env['store']))->rebuild();
+
+        $fromHumanUrl = $service->createNote('ana', 'Reply to human url ' . $iteration, [
+            'inReplyTo' => $remote['url'],
+        ]);
+        $fromAnnounce = $service->createNote('ana', 'Reply to announce ' . $iteration, [
+            'inReplyTo' => $announce['id'],
+        ]);
+
+        $this->check('reply human URL canonicalized to object id', ($fromHumanUrl['inReplyTo'] ?? null) === $remote['id']);
+        $this->check('reply Announce canonicalized to announced object id', ($fromAnnounce['inReplyTo'] ?? null) === $remote['id']);
     }
 
     private function scenarioLocalUserAutoFollow(int $iteration): void

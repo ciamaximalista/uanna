@@ -32,7 +32,7 @@ final class PostService
         $id = rtrim((string)$this->config['base_url'], '/') . '/u/' . rawurlencode($uid) . '/p/' . $stamp;
         $followers = $actorId . '/followers';
         $visibility = $options['visibility'] ?? 'public';
-        $inReplyTo = $options['inReplyTo'] ?? null;
+        $inReplyTo = $this->canonicalReplyTarget($options['inReplyTo'] ?? null);
         $directTo = $options['to'] ?? null;
         $attachments = is_array($options['attachments'] ?? null) ? $options['attachments'] : [];
         $mentions = $this->mentionsForContent($content, $uid);
@@ -591,5 +591,59 @@ final class PostService
         }
 
         return null;
+    }
+
+    private function canonicalReplyTarget(mixed $inReplyTo): ?string
+    {
+        if (!is_string($inReplyTo) || trim($inReplyTo) === '') {
+            return null;
+        }
+
+        $inReplyTo = trim($inReplyTo);
+        $repo = new ObjectRepository($this->store);
+        $object = $repo->findByIdOrAlias($inReplyTo);
+
+        if ($object === null) {
+            return $inReplyTo;
+        }
+
+        $announced = $this->announcedObjectId($object, $repo);
+        if ($announced !== null) {
+            return $announced;
+        }
+
+        $id = ActivityPub::objectId($object);
+        foreach (ActivityPub::aliases($object) as $alias) {
+            if ($alias === $id) {
+                continue;
+            }
+
+            $aliasObject = $repo->findByIdOrAlias($alias);
+            $aliasId = is_array($aliasObject) ? ActivityPub::objectId($aliasObject) : null;
+            if ($aliasId !== null && $aliasId !== $id) {
+                return $aliasId;
+            }
+        }
+
+        return $id ?? $inReplyTo;
+    }
+
+    private function announcedObjectId(array $object, ObjectRepository $repo): ?string
+    {
+        if (ActivityPub::objectType($object) !== 'Announce') {
+            return null;
+        }
+
+        $announced = $object['object'] ?? null;
+        if (is_array($announced)) {
+            return ActivityPub::objectId($announced);
+        }
+
+        if (!is_string($announced) || $announced === '') {
+            return null;
+        }
+
+        $announcedObject = $repo->findByIdOrAlias($announced);
+        return is_array($announcedObject) ? (ActivityPub::objectId($announcedObject) ?? $announced) : $announced;
     }
 }
