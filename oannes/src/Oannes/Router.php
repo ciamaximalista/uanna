@@ -689,6 +689,7 @@ final class Router
             $this->users->all(),
             $settings->all(),
             $settings->blockedServers(),
+            $settings->blockedActors(),
             $settings->blockNotices(),
             $message,
             $error,
@@ -774,9 +775,30 @@ final class Router
             return;
         }
 
-        $actor = is_string($_POST['actor'] ?? null) ? $_POST['actor'] : '';
-        (new InstanceSettings($this->store, $this->config))->addBlockedActor($actor);
-        $this->instanceAdmin('Actor bloqueado en todo el servidor.');
+        $settings = new InstanceSettings($this->store, $this->config);
+        $action = is_string($_POST['action'] ?? null) ? $_POST['action'] : 'add';
+        $actor = is_string($_POST['actor'] ?? null) ? trim($_POST['actor']) : '';
+        $query = is_string($_POST['actor_query'] ?? null) ? trim($_POST['actor_query']) : '';
+
+        try {
+            if ($action === 'delete') {
+                $settings->removeBlockedActor($actor);
+                $this->instanceAdmin('Bloqueo de usuario retirado.');
+                return;
+            }
+
+            if ($actor === '' && $query !== '') {
+                $resolved = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($query);
+                $actor = ActivityPub::objectId($resolved) ?? '';
+            }
+
+            $settings->addBlockedActor($actor);
+        } catch (\Throwable $e) {
+            $this->instanceAdmin(null, $e->getMessage());
+            return;
+        }
+
+        $this->instanceAdmin('Usuario bloqueado en todo el servidor.');
     }
 
     private function instanceAdminUsers(string $method): void

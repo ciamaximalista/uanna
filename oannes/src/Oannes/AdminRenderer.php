@@ -43,7 +43,7 @@ final class AdminRenderer
             . '</form></section>');
     }
 
-    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockNotices, ?string $message = null, ?string $error = null, string $openBox = '', array $appBuild = []): string
+    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockedActors, array $blockNotices, ?string $message = null, ?string $error = null, string $openBox = '', array $appBuild = []): string
     {
         $csrf = Html::escape($this->auth->csrfToken());
         $messageHtml = $message !== null ? '<p class="notice">' . Html::escape($message) . '</p>' : '';
@@ -99,18 +99,51 @@ final class AdminRenderer
                 . '<button type="submit" class="danger">Borrar</button></form></article>';
         }
         $serversHtml .= '</div>';
-        $noticesHtml = $blockNotices === [] ? '<p class="muted">Sin avisos de bloqueos de usuarios.</p>' : '<div class="notifications">';
+        $blockedUsersHtml = '<form method="post" action="?route=instance-admin/actor-block" class="follow-new-form">'
+            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+            . '<input type="hidden" name="action" value="add"/>'
+            . '<label>Bloquear usuario en todo el servidor <input name="actor_query" placeholder="@usuario@servidor.org o https://..." required/></label>'
+            . '<button type="submit" class="danger">Bloquear usuario</button>'
+            . '</form>';
+
+        $blockedUsersHtml .= '<h3>Bloqueados por usuarios del servidor</h3>';
+        $blockedUsersHtml .= $blockNotices === [] ? '<p class="muted">Sin usuarios bloqueados por miembros.</p>' : '<div class="notifications">';
         foreach ($blockNotices as $notice) {
             $actor = (string)($notice['actor'] ?? '');
             $blockedBy = is_array($notice['blocked_by'] ?? null) ? $notice['blocked_by'] : [];
-            $noticesHtml .= '<article class="notification follow-request"><div><strong>' . Html::escape($actor) . '</strong>'
-                . '<p class="meta">Bloqueado por: ' . Html::escape(implode(', ', $blockedBy)) . '</p></div>'
-                . '<form method="post" action="?route=instance-admin/actor-block" class="actions">'
-                . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
-                . '<input type="hidden" name="actor" value="' . Html::escape($actor) . '"/>'
-                . '<button type="submit">Bloquear en servidor</button></form></article>';
+            $isBlocked = in_array($actor, $blockedActors, true);
+            $blockedUsersHtml .= '<article class="notification follow-request"><div><strong>' . $this->actorLink($actor) . '</strong>'
+                . '<p class="meta">Bloqueado por: ' . Html::escape(implode(', ', $blockedBy)) . '</p></div>';
+
+            if ($isBlocked) {
+                $blockedUsersHtml .= '<span class="meta">Bloqueado en todo el servidor</span>';
+            } else {
+                $blockedUsersHtml .= '<form method="post" action="?route=instance-admin/actor-block" class="actions">'
+                    . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+                    . '<input type="hidden" name="action" value="add"/>'
+                    . '<input type="hidden" name="actor" value="' . Html::escape($actor) . '"/>'
+                    . '<button type="submit">Bloquear en servidor</button></form>';
+            }
+
+            $blockedUsersHtml .= '</article>';
         }
-        $noticesHtml .= $blockNotices === [] ? '' : '</div>';
+        $blockedUsersHtml .= $blockNotices === [] ? '' : '</div>';
+
+        $blockedUsersHtml .= '<h3>Bloqueados en todo el servidor</h3>';
+        if ($blockedActors === []) {
+            $blockedUsersHtml .= '<p class="muted">Sin usuarios bloqueados en todo el servidor.</p>';
+        } else {
+            $blockedUsersHtml .= '<div class="actor-list">';
+            foreach ($blockedActors as $actor) {
+                $blockedUsersHtml .= '<article class="actor-row"><span>' . $this->actorLink((string)$actor) . '</span>'
+                    . '<form method="post" action="?route=instance-admin/actor-block" class="actor-actions">'
+                    . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+                    . '<input type="hidden" name="action" value="delete"/>'
+                    . '<input type="hidden" name="actor" value="' . Html::escape((string)$actor) . '"/>'
+                    . '<button type="submit">Quitar bloqueo</button></form></article>';
+            }
+            $blockedUsersHtml .= '</div>';
+        }
         $createUsersHtml = '<form method="post" action="?route=instance-admin/users" class="form-grid">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="action" value="add"/>'
@@ -168,7 +201,7 @@ final class AdminRenderer
             . $this->panelBox('Instancia', $instanceHtml)
             . $this->panelBox('Imágenes de instancia', $settingsHtml)
             . $this->panelBox('Actualizaciones', $updatesHtml, $openBox === 'updates')
-            . $this->panelBox('Avisos de bloqueo', $noticesHtml)
+            . $this->panelBox('Usuarios bloqueados', $blockedUsersHtml)
             . $this->panelBox('Servidores bloqueados', $serversHtml)
             . $this->panelBox('Crear usuarios', $createUsersHtml)
             . $this->panelBox('Editar usuarios', $editUsersHtml)

@@ -110,6 +110,15 @@ final class InstanceSettings
         $this->writeList('blocked_actors.json', array_values(array_unique([...$this->blockedActors(), $actor])));
     }
 
+    public function removeBlockedActor(string $actor): void
+    {
+        $actor = trim($actor);
+        $this->writeList('blocked_actors.json', array_values(array_filter(
+            $this->blockedActors(),
+            static fn (string $item): bool => $item !== $actor
+        )));
+    }
+
     public function isActorBlocked(string $actor): bool
     {
         if (in_array($actor, $this->blockedActors(), true)) {
