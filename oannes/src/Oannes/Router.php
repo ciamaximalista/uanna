@@ -29,6 +29,11 @@ final class Router
             $route = $this->routeFromRequestPath();
         }
 
+        if ($route === 'favicon.ico') {
+            $this->favicon();
+            return;
+        }
+
         $this->runOpportunisticMaintenance($route, $method);
 
         if ($this->users->all() === [] && $route !== 'setup') {
@@ -234,6 +239,10 @@ final class Router
             return '';
         }
 
+        if ($path === 'favicon.ico') {
+            return 'favicon.ico';
+        }
+
         if ($path === '.well-known/webfinger' || $path === '.well-known/nodeinfo' || $path === 'nodeinfo/2.1') {
             return $path;
         }
@@ -261,6 +270,35 @@ final class Router
         }
 
         return '';
+    }
+
+    private function favicon(): void
+    {
+        $settings = new InstanceSettings($this->store, $this->config);
+        $path = $settings->faviconPath();
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            header('Location: ' . $path, true, 302);
+            return;
+        }
+
+        $publicDir = rtrim((string)($this->config['public_dir'] ?? dirname(__DIR__, 2) . '/public'), '/');
+        $file = $publicDir . '/' . ltrim($path, '/');
+
+        if (!is_file($file)) {
+            $file = dirname(__DIR__, 3) . '/uanna.png';
+        }
+
+        if (!is_file($file)) {
+            Http::notFound();
+            return;
+        }
+
+        $type = mime_content_type($file) ?: 'image/png';
+        header('Content-Type: ' . $type);
+        header('Cache-Control: public, max-age=3600');
+        header('Content-Length: ' . (string)filesize($file));
+        readfile($file);
     }
 
     private function html(): void

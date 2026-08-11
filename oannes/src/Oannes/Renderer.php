@@ -583,12 +583,10 @@ final class Renderer
             }
 
             $safeUrl = Html::escape($url);
-            $html .= '<figure class="post-attachment">'
-                . '<a href="' . $safeUrl . '" target="_blank" rel="noopener">'
-                . '<img src="' . $safeUrl . '" alt="' . Html::escape($alt) . '" loading="lazy"/>'
-                . '</a>'
-                . ($alt !== '' ? '<figcaption>' . Html::escape($alt) . '</figcaption>' : '')
-                . '</figure>';
+            $html .= '<p class="post-attachment">'
+                . '<a href="' . $safeUrl . '" target="_blank" rel="noopener">Imagen adjunta</a>'
+                . ($alt !== '' ? ': ' . Html::escape($alt) : '')
+                . '</p>';
         }
 
         return $html !== '' ? '<div class="post-attachments">' . $html . '</div>' : '';

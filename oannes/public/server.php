@@ -20,6 +20,26 @@ if (is_string($path)) {
         }
     }
 
+    if ($path === '/favicon.ico') {
+        require dirname(__DIR__) . '/src/Oannes/Autoload.php';
+        Oannes\Autoload::register();
+        $config = require dirname(__DIR__) . '/config/oannes.php';
+        $settings = new Oannes\InstanceSettings(new Oannes\FileStore($config['data_dir']), $config);
+        $favicon = $settings->faviconPath();
+        $file = __DIR__ . '/' . ltrim($favicon, '/');
+
+        if (!is_file($file)) {
+            $file = dirname(__DIR__, 2) . '/uanna.png';
+        }
+
+        if (is_file($file)) {
+            header('Content-Type: ' . (mime_content_type($file) ?: 'image/png'));
+            header('Content-Length: ' . (string)filesize($file));
+            readfile($file);
+            return true;
+        }
+    }
+
     if (preg_match('#^/([a-zA-Z0-9_-]{1,64})/s/([^/]+)$#', $path, $match)) {
         $static = dirname(__DIR__, 2) . '/user/' . $match[1] . '/static/' . $match[2];
 
