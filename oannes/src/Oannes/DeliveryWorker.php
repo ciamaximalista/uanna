@@ -55,6 +55,14 @@ final class DeliveryWorker
                     $stats['skipped']++;
                 }
             } catch (\Throwable $e) {
+                if ($e instanceof IndeterminateDeliveryException) {
+                    $claimed['delivery_uncertain'] = true;
+                    $claimed['last_error'] = $e->getMessage();
+                    $this->queue->complete($claimed);
+                    $stats['skipped']++;
+                    continue;
+                }
+
                 $attempts = ((int)($claimed['attempts'] ?? 0)) + 1;
                 $maxAttempts = (int)($this->config['delivery_max_attempts'] ?? 8);
 
@@ -145,6 +153,61 @@ final class DeliveryWorker
             throw new RuntimeException('Refusing non-HTTPS delivery URL');
         }
 
+        if (function_exists('curl_init')) {
+            return $this->postWithCurl($url, $headers, $body);
+        }
+
+        return $this->postWithStream($url, $headers, $body);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function postWithCurl(string $url, array $headers, string $body): int
+    {
+        $headerLines = [];
+        foreach ($headers as $name => $value) {
+            $headerLines[] = $name . ': ' . $value;
+        }
+
+        $curl = curl_init($url);
+        if ($curl === false) {
+            throw new RuntimeException('Cannot initialize delivery request');
+        }
+
+        curl_setopt_array($curl, [
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => $headerLines,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => false,
+            CURLOPT_CONNECTTIMEOUT => min(10, (int)($this->config['delivery_timeout_seconds'] ?? 20)),
+            CURLOPT_TIMEOUT => (int)($this->config['delivery_timeout_seconds'] ?? 20),
+        ]);
+
+        $result = curl_exec($curl);
+        $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        $errno = curl_errno($curl);
+        $error = curl_error($curl);
+        $connectTime = (float)curl_getinfo($curl, CURLINFO_CONNECT_TIME);
+        curl_close($curl);
+
+        if ($result === false || $status === 0) {
+            if (in_array($errno, [CURLE_COULDNT_RESOLVE_HOST, CURLE_COULDNT_CONNECT, CURLE_SSL_CONNECT_ERROR], true) || $connectTime <= 0.0) {
+                throw new RuntimeException('Delivery network error before sending request: ' . ($error !== '' ? $error : 'no response'));
+            }
+
+            throw new IndeterminateDeliveryException('Delivery outcome is indeterminate after opening connection: ' . ($error !== '' ? $error : 'no HTTP status'));
+        }
+
+        return $status;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function postWithStream(string $url, array $headers, string $body): int
+    {
         $headerLines = [];
         foreach ($headers as $name => $value) {
             $headerLines[] = $name . ': ' . $value;
@@ -163,13 +226,13 @@ final class DeliveryWorker
         $result = @file_get_contents($url, false, $context);
 
         if ($result === false && !isset($http_response_header)) {
-            throw new RuntimeException('Delivery request failed before receiving a response');
+            throw new IndeterminateDeliveryException('Delivery request ended without a readable response');
         }
 
         $statusLine = $http_response_header[0] ?? '';
 
         if (!preg_match('/^HTTP\/\S+\s+(\d{3})\b/', $statusLine, $match)) {
-            throw new RuntimeException('Delivery response did not include an HTTP status');
+            throw new IndeterminateDeliveryException('Delivery response did not include an HTTP status');
         }
 
         return (int)$match[1];
@@ -196,4 +259,8 @@ final class DeliveryWorker
     {
         return min(86400, 60 * (2 ** max(0, $attempts - 1)));
     }
+}
+
+final class IndeterminateDeliveryException extends RuntimeException
+{
 }

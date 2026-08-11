@@ -485,14 +485,31 @@ final class Router
         $actorId = $this->users->actorId($uid);
         $objects = $this->repo->byAnyActor(array_merge([$actorId], $this->users->legacyActorIds($uid)), 50);
         $objects = $this->publicObjects($objects);
+        $items = array_values(array_map(fn (array $object): array => $this->createActivityForOutbox($object), $objects));
 
         Http::activityJson([
             '@context' => 'https://www.w3.org/ns/activitystreams',
             'id' => $actorId . '/outbox',
             'type' => 'OrderedCollection',
             'totalItems' => count($objects),
-            'orderedItems' => $objects,
+            'orderedItems' => $items,
         ]);
+    }
+
+    private function createActivityForOutbox(array $object): array
+    {
+        $id = ActivityPub::objectId($object) ?? '';
+
+        return [
+            '@context' => 'https://www.w3.org/ns/activitystreams',
+            'id' => $id . '#create',
+            'type' => 'Create',
+            'actor' => ActivityPub::attributedTo($object) ?? '',
+            'published' => ActivityPub::published($object),
+            'to' => is_array($object['to'] ?? null) ? $object['to'] : [],
+            'cc' => is_array($object['cc'] ?? null) ? $object['cc'] : [],
+            'object' => $object,
+        ];
     }
 
     private function publicObjects(array $objects): array

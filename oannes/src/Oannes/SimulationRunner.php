@@ -26,6 +26,8 @@ final class SimulationRunner
             $this->scenarioInboxSecurity($i);
             $this->scenarioNegativeInputs($i);
             $this->scenarioDeliveryDryRun($i);
+            $this->scenarioDeliveryDeduplication($i);
+            $this->scenarioOutboxCreateIdentity($i);
         }
 
         $failed = array_values(array_filter($this->checks, static fn (array $check): bool => !$check['ok']));
@@ -174,6 +176,56 @@ final class SimulationRunner
         $this->check('post note creates id', is_string($note['id'] ?? null));
         $this->check('dry-run skips delivery', ($stats['skipped'] ?? 0) === 1 && ($stats['delivered'] ?? 1) === 0);
         $this->check('dry-run keeps job pending', count($pending) === 1);
+    }
+
+    private function scenarioDeliveryDeduplication(int $iteration): void
+    {
+        $env = $this->environment('delivery-dedup-' . $iteration);
+        $activity = [
+            'id' => 'https://example.test/u/ana/p/dedup-' . $iteration . '#create',
+            'type' => 'Create',
+            'actor' => 'https://example.test/u/ana',
+            'object' => [
+                'id' => 'https://example.test/u/ana/p/dedup-' . $iteration,
+                'type' => 'Note',
+            ],
+        ];
+        $payload = [
+            'actor' => 'https://example.test/u/ana',
+            'inbox' => 'https://remote.test/inbox',
+            'activity' => $activity,
+        ];
+
+        $first = $env['queue']->enqueue('deliver', $payload);
+        $second = $env['queue']->enqueue('deliver', $payload);
+        $pending = $this->deliverJobs($env['queue']);
+        $env['queue']->complete($pending[0]);
+        $third = $env['queue']->enqueue('deliver', $payload);
+
+        $this->check('delivery dedup returns same pending id', $first === $second && count($pending) === 1);
+        $this->check('delivery dedup does not requeue completed id', $third === $first && count($this->deliverJobs($env['queue'])) === 0);
+    }
+
+    private function scenarioOutboxCreateIdentity(int $iteration): void
+    {
+        $env = $this->environment('outbox-create-' . $iteration);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $note = (new PostService($env['store'], $users, $env['queue'], new SocialGraph($env['store']), $env['config']))
+            ->createNote('ana', 'Outbox identity ' . $iteration);
+        $router = new Router(
+            $env['config'],
+            $env['store'],
+            new ObjectRepository($env['store']),
+            new Renderer(new ObjectRepository($env['store']), $env['config']),
+            $users,
+        );
+        $method = new \ReflectionMethod($router, 'createActivityForOutbox');
+        $method->setAccessible(true);
+        $activity = $method->invoke($router, $note);
+
+        $this->check('outbox item is Create activity', ($activity['type'] ?? null) === 'Create');
+        $this->check('outbox Create id differs from Note id', ($activity['id'] ?? null) === ($note['id'] ?? '') . '#create');
+        $this->check('outbox Create object keeps stable Note id', ($activity['object']['id'] ?? null) === ($note['id'] ?? null));
     }
 
     private function scenarioCanonicalReplyTarget(int $iteration): void
