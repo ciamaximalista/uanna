@@ -10,7 +10,14 @@ final class FileQueue
 
     public function enqueue(string $type, array $payload, ?string $notBefore = null): string
     {
-        $id = gmdate('YmdHis') . '-' . bin2hex(random_bytes(8));
+        $id = $this->stableId($type, $payload) ?? gmdate('YmdHis') . '-' . bin2hex(random_bytes(8));
+
+        foreach (['pending', 'processing', 'done'] as $status) {
+            if (is_file($this->path($status, $id))) {
+                return $id;
+            }
+        }
+
         $job = [
             'id' => $id,
             'type' => $type,
@@ -45,6 +52,8 @@ final class FileQueue
 
     public function due(int $limit = 25): array
     {
+        $this->recoverStaleProcessing();
+
         $now = gmdate('c');
         $due = [];
 
@@ -61,9 +70,42 @@ final class FileQueue
         return $due;
     }
 
+    public function claim(array $job): ?array
+    {
+        $id = (string)($job['id'] ?? '');
+
+        if ($id === '') {
+            return null;
+        }
+
+        $pending = $this->path('pending', $id);
+        $processing = $this->path('processing', $id);
+
+        if (!is_file($pending)) {
+            return null;
+        }
+
+        $dir = dirname($processing);
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return null;
+        }
+
+        if (!@rename($pending, $processing)) {
+            return null;
+        }
+
+        $claimed = is_file($processing) ? $this->store->readJson($processing) : $job;
+        $claimed['status'] = 'processing';
+        $claimed['claimed_at'] = gmdate('c');
+        $this->store->writeJson($processing, $claimed);
+
+        return $claimed;
+    }
+
     public function fail(array $job, string $error, int $retrySeconds = 300): void
     {
         $id = (string)$job['id'];
+        $this->remove('processing', $id);
         $this->remove('pending', $id);
 
         $job['status'] = 'pending';
@@ -77,6 +119,7 @@ final class FileQueue
     public function dead(array $job, string $error): void
     {
         $id = (string)$job['id'];
+        $this->remove('processing', $id);
         $this->remove('pending', $id);
 
         $job['status'] = 'dead';
@@ -89,6 +132,7 @@ final class FileQueue
     public function complete(array $job): void
     {
         $id = (string)$job['id'];
+        $this->remove('processing', $id);
         $this->remove('pending', $id);
 
         $job['status'] = 'done';
@@ -100,6 +144,38 @@ final class FileQueue
     private function path(string $status, string $id): string
     {
         return $this->store->dataDir() . '/queue/' . $status . '/' . $id . '.json';
+    }
+
+    private function stableId(string $type, array $payload): ?string
+    {
+        if ($type !== 'deliver') {
+            return null;
+        }
+
+        $inbox = $payload['inbox'] ?? null;
+        $activity = $payload['activity'] ?? null;
+        $activityId = is_array($activity) ? ($activity['id'] ?? null) : null;
+
+        if (!is_string($inbox) || $inbox === '' || !is_string($activityId) || $activityId === '') {
+            return null;
+        }
+
+        return 'deliver-' . Id::digest($inbox . "\n" . $activityId);
+    }
+
+    private function recoverStaleProcessing(int $olderThanSeconds = 1800): void
+    {
+        $dir = $this->store->dataDir() . '/queue/processing';
+        $threshold = time() - $olderThanSeconds;
+
+        foreach (glob($dir . '/*.json') ?: [] as $file) {
+            if (!is_file($file) || filemtime($file) > $threshold) {
+                continue;
+            }
+
+            $id = basename($file, '.json');
+            @rename($file, $this->path('pending', $id));
+        }
     }
 
     private function remove(string $status, string $id): void

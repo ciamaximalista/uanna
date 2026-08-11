@@ -36,6 +36,7 @@ final class PostService
         $directTo = $options['to'] ?? null;
         $attachments = is_array($options['attachments'] ?? null) ? $options['attachments'] : [];
         $mentions = $this->mentionsForContent($content, $uid);
+        $replyActor = is_string($inReplyTo) && $inReplyTo !== '' ? $this->replyActorFor($inReplyTo) : null;
         $html = $this->contentHtml($content, $mentions);
 
         $to = [];
@@ -54,6 +55,14 @@ final class PostService
             if (is_string($mention['actor'] ?? null) && $mention['actor'] !== '' && !in_array($mention['actor'], $to, true)) {
                 $to[] = $mention['actor'];
             }
+        }
+
+        if ($replyActor !== null && $visibility !== 'direct' && !in_array($replyActor, $to, true) && !in_array($replyActor, $cc, true)) {
+            $cc[] = $replyActor;
+        }
+
+        if ($visibility === 'direct' && is_string($directTo) && $directTo !== '' && $this->localUidForActor($directTo) === null && $this->inboxForRemoteActorId($directTo) === null) {
+            throw new \InvalidArgumentException('El actor destinatario no tiene inbox.');
         }
 
         $note = [
@@ -109,22 +118,7 @@ final class PostService
             'object' => $note,
         ];
 
-        foreach ($this->deliveryInboxes($uid, $visibility, is_string($directTo) ? $directTo : null) as $inbox) {
-            $this->queue->enqueue('deliver', [
-                'actor' => $actorId,
-                'inbox' => $inbox,
-                'activity' => $create,
-            ]);
-        }
-
-        foreach ($this->mentionInboxes($mentions) as $inbox) {
-            $this->queue->enqueue('deliver', [
-                'actor' => $actorId,
-                'inbox' => $inbox,
-                'activity' => $create,
-            ]);
-        }
-
+        $this->enqueueAudience($uid, $note, $create);
         $this->notifyLocalMentions($uid, $note, $create, $mentions);
 
         return $note;
@@ -325,7 +319,6 @@ final class PostService
     private function mentionInboxes(array $mentions): array
     {
         $actors = new ActorRepository($this->store);
-        $graph = new SocialGraph($this->store);
         $inboxes = [];
 
         foreach ($mentions as $mention) {
@@ -335,11 +328,7 @@ final class PostService
             }
 
             $actor = $actors->findById($actorId);
-            if ($actor === null) {
-                continue;
-            }
-
-            $inbox = $graph->inboxForActor($actor);
+            $inbox = $actor !== null ? $this->graph->inboxForActor($actor) : $this->inboxForRemoteActorId($actorId);
             if ($inbox !== null) {
                 $inboxes[] = $inbox;
             }
@@ -361,16 +350,80 @@ final class PostService
 
     private function audienceInboxes(string $uid, array $object): array
     {
-        $inboxes = $this->graph->followerInboxes($uid);
+        $inboxes = [];
         $actors = new ActorRepository($this->store);
+        $audience = ActivityPub::audience($object);
+        $followers = $this->users->actorId($uid) . '/followers';
 
-        foreach (array_merge(is_array($object['to'] ?? null) ? $object['to'] : [], is_array($object['cc'] ?? null) ? $object['cc'] : []) as $actorId) {
+        if (in_array(ActivityPub::PUBLIC_AUDIENCE, $audience, true) || in_array($followers, $audience, true)) {
+            $inboxes = $this->remoteFollowerInboxes($uid);
+        }
+
+        foreach ($audience as $actorId) {
             if (!is_string($actorId) || $actorId === '' || $actorId === 'https://www.w3.org/ns/activitystreams#Public' || str_ends_with($actorId, '/followers')) {
                 continue;
             }
 
+            if ($this->localUidForActor($actorId) !== null) {
+                continue;
+            }
+
             $actor = $actors->findById($actorId);
-            if ($actor === null) {
+            $inbox = $actor !== null ? $this->graph->inboxForActor($actor) : $this->inboxForRemoteActorId($actorId);
+            if ($inbox !== null) {
+                $inboxes[] = $inbox;
+            }
+        }
+
+        return array_values(array_unique($inboxes));
+    }
+
+    private function replyActorFor(string $inReplyTo): ?string
+    {
+        $parent = (new ObjectRepository($this->store))->findByIdOrAlias($inReplyTo);
+
+        if ($parent === null) {
+            return null;
+        }
+
+        $actorId = ActivityPub::attributedTo($parent);
+        if ($actorId === null || $this->localUidForActor($actorId) !== null) {
+            return null;
+        }
+
+        if ($this->inboxForRemoteActorId($actorId) === null) {
+            return null;
+        }
+
+        return $actorId;
+    }
+
+    private function inboxForRemoteActorId(string $actorId): ?string
+    {
+        if ($actorId === '' || $this->localUidForActor($actorId) !== null) {
+            return null;
+        }
+
+        $actors = new ActorRepository($this->store);
+        $actor = $actors->findById($actorId);
+
+        if ($actor === null && str_starts_with($actorId, 'https://')) {
+            try {
+                $actor = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($actorId);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return is_array($actor) ? $this->graph->inboxForActor($actor) : null;
+    }
+
+    private function remoteFollowerInboxes(string $uid): array
+    {
+        $inboxes = [];
+
+        foreach ($this->graph->followers($uid) as $actor) {
+            if ($this->isLocalActor($actor)) {
                 continue;
             }
 
@@ -381,6 +434,17 @@ final class PostService
         }
 
         return array_values(array_unique($inboxes));
+    }
+
+    private function isLocalActor(array $actor): bool
+    {
+        foreach (ActivityPub::aliases($actor) as $alias) {
+            if ($this->localUidForActor($alias) !== null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function notifyLocalMentions(string $authorUid, array $note, array $create, array $mentions): void

@@ -397,7 +397,7 @@ final class InteractionService
         }
 
         if (($activity['type'] ?? '') === 'Announce') {
-            $inboxes = array_merge($inboxes, $this->graph->followerInboxes($uid));
+            $inboxes = array_merge($inboxes, $this->remoteFollowerInboxes($uid));
         }
 
         foreach (array_values(array_unique($inboxes)) as $inbox) {
@@ -417,5 +417,48 @@ final class InteractionService
         } catch (\Throwable) {
             return [];
         }
+    }
+
+    private function remoteFollowerInboxes(string $uid): array
+    {
+        $inboxes = [];
+
+        foreach ($this->graph->followers($uid) as $actor) {
+            if ($this->isLocalActor($actor)) {
+                continue;
+            }
+
+            $inbox = $this->graph->inboxForActor($actor);
+            if ($inbox !== null) {
+                $inboxes[] = $inbox;
+            }
+        }
+
+        return array_values(array_unique($inboxes));
+    }
+
+    private function isLocalActor(array $actor): bool
+    {
+        foreach (ActivityPub::aliases($actor) as $alias) {
+            if ($this->localUidForActor($alias) !== null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function localUidForActor(string $actorId): ?string
+    {
+        foreach ($this->users->all() as $uid => $user) {
+            $uid = (string)$uid;
+            $ids = array_merge([$this->users->actorId($uid), $this->users->webUrl($uid)], $this->users->legacyActorIds($uid));
+
+            if (in_array($actorId, $ids, true)) {
+                return $uid;
+            }
+        }
+
+        return null;
     }
 }

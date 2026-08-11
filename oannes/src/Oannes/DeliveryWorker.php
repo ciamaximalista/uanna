@@ -35,25 +35,34 @@ final class DeliveryWorker
                 continue;
             }
 
+            $claimed = $dryRun ? $job : $this->queue->claim($job);
+            if ($claimed === null) {
+                $stats['skipped']++;
+                continue;
+            }
+
             $handled++;
             try {
-                $result = $this->deliver($job, $dryRun);
+                $result = $this->deliver($claimed, $dryRun);
 
                 if (($result['sent'] ?? false) === true) {
-                    $this->queue->complete($job);
+                    $this->queue->complete($claimed);
                     $stats['delivered']++;
                 } else {
+                    if (!$dryRun) {
+                        $this->queue->fail($claimed, 'Delivery skipped before POST', 60);
+                    }
                     $stats['skipped']++;
                 }
             } catch (\Throwable $e) {
-                $attempts = ((int)($job['attempts'] ?? 0)) + 1;
+                $attempts = ((int)($claimed['attempts'] ?? 0)) + 1;
                 $maxAttempts = (int)($this->config['delivery_max_attempts'] ?? 8);
 
                 if ($attempts >= $maxAttempts) {
-                    $this->queue->dead($job, $e->getMessage());
+                    $this->queue->dead($claimed, $e->getMessage());
                     $stats['dead']++;
                 } else {
-                    $this->queue->fail($job, $e->getMessage(), $this->retrySeconds($attempts));
+                    $this->queue->fail($claimed, $e->getMessage(), $this->retrySeconds($attempts));
                     $stats['failed']++;
                 }
             }

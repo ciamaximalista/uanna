@@ -376,10 +376,13 @@ final class Router
 
         Http::json([
             'subject' => 'acct:' . $uid . '@' . $this->config['host'],
-            'aliases' => [
-                $this->users->actorId($uid),
-                $this->users->webUrl($uid),
-            ],
+            'aliases' => array_values(array_unique(array_merge(
+                [
+                    $this->users->actorId($uid),
+                    $this->users->webUrl($uid),
+                ],
+                $this->users->legacyActorIds($uid),
+            ))),
             'links' => [
                 [
                     'rel' => 'self',
@@ -1185,6 +1188,13 @@ final class Router
             $this->users->updateProfile($uid, [
                 ...$fields,
             ]);
+            (new ActorUpdateService(
+                $this->store,
+                $this->users,
+                new FileQueue($this->store),
+                new SocialGraph($this->store),
+                $this->config,
+            ))->enqueue($uid);
 
             if ($changePassword) {
                 $auth->setPassword($uid, $newPassword);
