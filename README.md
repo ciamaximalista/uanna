@@ -2,76 +2,76 @@
 
 # Uanna
 
-Uanna es un servidor de micro-blogging para comunidades por invitacion dentro del Fediverso. Esta pensado para grupos menores de 80 personas que prefieren una herramienta sencilla, auditable y facil de mantener antes que una plataforma grande con muchas dependencias.
+Uanna is a microblogging server for invitation-based communities in the Fediverse. It is designed for groups under 80 people that prefer a simple, auditable, easy-to-maintain tool over a large platform with many dependencies.
 
-Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni ningun otro motor de base de datos.
+Uanna works with JSON and XML files. It does not use SQLite, MySQL, MariaDB, Redis, or any other database engine.
 
-## Caracteristicas
+## Features
 
-- Publicacion de notas locales con visibilidad publica, seguidores o privada.
-- Timeline personal para usuarios autenticados.
-- Portada publica con presentacion editable de la instancia.
-- Perfiles publicos en rutas tipo `/@usuario`.
-- Perfiles internos para actores federados cacheados, manteniendo enlace al perfil original.
-- Favoritos e impulsos, con avatares enlazados a los perfiles y acciones reversibles.
-- Arboles de respuestas basados en `inReplyTo`, sin confundir enlaces con respuestas.
-- Menciones `@usuario` y `@usuario@servidor` con enlaces y avisos.
-- Adjuntos de imagen con texto alternativo.
-- Edicion y borrado de publicaciones propias con envio de actividades ActivityPub.
-- Panel de usuario con perfil, notificaciones, seguidores, seguidos, busqueda y mensajes privados.
-- Interfaz multidioma por archivos JSON, con idioma por defecto de instancia e idioma elegido por cada usuario.
-- Exportacion de usuario desde el panel en ZIP, con `archive.xml` y adjuntos locales incluidos.
-- Notificaciones con contador de no leidas y pendientes, enlaces a perfiles originales y publicaciones afectadas.
-- Panel de administracion para configurar imagenes, nombre, presentacion, usuarios, actualizaciones y bloqueos.
-- Compilacion de app Android desde el panel de administracion, usando el nombre y favicon de la instancia.
-- Importacion de usuarios desde XML o ZIP Uanna, restaurando perfil, posts y adjuntos.
-- Moderacion para altas, seguimientos, publicaciones pendientes, bloqueos de actores y servidores.
-- Actualizacion de recepcion y envios por cron o al detectarse actividad, sin saturar visitas normales.
-- Importacion y herramientas de diagnostico para migraciones desde snac.
-- Almacenamiento atomico en archivos para reducir corrupcion ante cortes o fallos.
+- Local note publishing with public, followers-only, or private visibility.
+- Personal timeline for authenticated users.
+- Public home page with an editable instance presentation.
+- Public profiles at routes such as `/@user`.
+- Internal profiles for cached federated actors, while keeping a link to the original profile.
+- Favorites and boosts, with avatars linked to profiles and reversible actions.
+- Reply trees based on `inReplyTo`, without confusing links with replies.
+- `@user` and `@user@server` mentions with links and notifications.
+- Image attachments with alternative text.
+- Editing and deleting your own posts, sending the corresponding ActivityPub activities.
+- User panel with profile, notifications, followers, following, search, and private messages.
+- Multilingual interface based on JSON files, with an instance default language and a language chosen by each user.
+- User export from the panel as a ZIP file, including `archive.xml` and local attachments.
+- Notifications with unread and pending counters, links to original profiles, and affected posts.
+- Administration panel for configuring images, instance name, presentation, users, updates, and blocks.
+- Android app build from the administration panel, using the instance name and favicon.
+- User import from Uanna XML or ZIP, restoring profile, posts, and attachments.
+- Moderation for signups, follows, pending posts, actor blocks, and server blocks.
+- Inbox and delivery processing by cron or on detected activity, without overloading normal visits.
+- Import and diagnostic tools for migrations from snac.
+- Atomic file storage to reduce corruption after power loss or failures.
 
-## Licencia
+## License
 
-Uanna se distribuye bajo la Licencia Publica de la Union Europea, version 1.2, EUPL-1.2. El texto completo esta en `LICENSE.txt`.
+Uanna is distributed under the European Union Public Licence, version 1.2, EUPL-1.2. The full text is in `LICENSE.txt`.
 
-## Requisitos
+## Requirements
 
-- PHP 8.1 o superior.
-- Servidor web con soporte PHP, por ejemplo Apache con PHP-FPM, Nginx con PHP-FPM o el servidor integrado de PHP para pruebas.
-- Extensiones PHP: `json`, `openssl`, `mbstring`, `fileinfo`, `gd`, `dom` y `zip`.
-- Un dominio con HTTPS valido para federar correctamente.
-- Permisos de escritura para PHP en `oannes/data` y `oannes/public/assets`.
-- Opcional para compilar app Android desde el panel: JDK 17, Gradle y Android SDK con platform/build-tools compatibles.
+- PHP 8.1 or later.
+- A web server with PHP support, for example Apache with PHP-FPM, Nginx with PHP-FPM, or PHP's built-in server for testing.
+- PHP extensions: `json`, `openssl`, `mbstring`, `fileinfo`, `gd`, `dom`, and `zip`.
+- A domain with valid HTTPS for proper federation.
+- Write permissions for PHP in `oannes/data` and `oannes/public/assets`.
+- Optional for building the Android app from the panel: JDK 17, Gradle, and an Android SDK with compatible platform/build-tools.
 
-## Instalacion
+## Installation
 
-Clona el repositorio:
+Clone the repository:
 
 ```sh
 git clone https://github.com/ciamaximalista/uanna.git
 cd uanna
 ```
 
-Crea la configuracion local:
+Create the local configuration:
 
 ```sh
 cp oannes/config/oannes.example.php oannes/config/oannes.php
 ```
 
-Edita `oannes/config/oannes.php` y cambia al menos:
+Edit `oannes/config/oannes.php` and change at least:
 
 ```php
-'host' => 'tu-dominio.org',
-'base_url' => 'https://tu-dominio.org',
+'host' => 'your-domain.org',
+'base_url' => 'https://your-domain.org',
 'timezone' => 'Europe/Madrid',
 ```
 
-Crea los directorios de datos y assets, y da permisos de escritura al usuario del servidor web. Uanna escribe desde PHP, asi que el propietario operativo debe ser el usuario real de Apache/PHP-FPM (`www-data`, `apache`, `nginx`, `nobody` u otro segun el servidor). Si tambien vas a lanzar tareas desde consola, anade tu usuario al mismo grupo.
+Create the data and asset directories, and grant write permissions to the web server user. Uanna writes from PHP, so the operating owner should be the real Apache/PHP-FPM user (`www-data`, `apache`, `nginx`, `nobody`, or another user depending on the server). If you will also run tasks from the console, add your user to the same group.
 
 ```sh
-cd /ruta/a/uanna
+cd /path/to/uanna
 
-# Cambia estos valores por el usuario/grupo real de PHP en tu servidor.
+# Change these values to the real PHP user/group on your server.
 WEB_USER=www-data
 WEB_GROUP=www-data
 
@@ -80,46 +80,46 @@ sudo chown -R "$WEB_USER:$WEB_GROUP" oannes/data oannes/public/assets
 sudo find oannes/data oannes/public/assets -type d -exec chmod 2775 {} +
 sudo find oannes/data oannes/public/assets -type f -exec chmod 0664 {} +
 
-# Opcional, solo si vas a ejecutar comandos de mantenimiento desde tu usuario shell.
+# Optional, only if you will run maintenance commands from your shell user.
 sudo usermod -aG "$WEB_GROUP" "$USER"
 ```
 
-Cierra sesion y vuelve a entrar si has cambiado grupos con `usermod`.
+Log out and log back in if you changed groups with `usermod`.
 
-Para detectar el usuario de PHP mira los procesos web que no sean `root`:
+To detect the PHP user, inspect the non-root web processes:
 
 ```sh
 ps -eo user,comm,args | grep -E 'apache2|httpd|php-fpm|nginx' | grep -v root
 ```
 
-En Apache con PHP-FPM de Debian/Ubuntu suele ser `www-data:www-data`; en Apache de algunas instalaciones compartidas puede ser `nobody:nogroup`; en CentOS/RHEL puede ser `apache:apache`; en Nginx con PHP-FPM depende del `user` configurado en el pool.
+On Debian/Ubuntu with Apache and PHP-FPM this is usually `www-data:www-data`; on some shared Apache installations it may be `nobody:nogroup`; on CentOS/RHEL it may be `apache:apache`; on Nginx with PHP-FPM it depends on the pool's configured `user`.
 
-No mezcles datos creados por usuarios distintos sin grupo comun escribible. Si unos ficheros quedan como `david` y otros como `nobody`, las notificaciones, respuestas, adjuntos o colas pueden fallar aunque el sitio parezca cargar bien.
+Do not mix data created by incompatible users without a shared writable group. If some files are owned by `david` and others by `nobody`, notifications, replies, attachments, or queues may fail even if the site appears to load correctly.
 
-Configura el servidor web para que el document root apunte a:
+Configure the web server so the document root points to:
 
 ```text
 oannes/public
 ```
 
-Todas las rutas deben terminar en `oannes/public/index.php` salvo los archivos estaticos existentes. En Apache puedes usar una regla equivalente a:
+All routes should end in `oannes/public/index.php` except existing static files. In Apache you can use a rule equivalent to:
 
 ```apache
-DocumentRoot /ruta/a/uanna/oannes/public
+DocumentRoot /path/to/uanna/oannes/public
 
-<Directory /ruta/a/uanna/oannes/public>
+<Directory /path/to/uanna/oannes/public>
     AllowOverride All
     Require all granted
     FallbackResource /index.php
 </Directory>
 ```
 
-En Nginx, una configuracion minima con PHP-FPM seria:
+In Nginx, a minimal PHP-FPM configuration would be:
 
 ```nginx
 server {
-    server_name tu-dominio.org;
-    root /ruta/a/uanna/oannes/public;
+    server_name your-domain.org;
+    root /path/to/uanna/oannes/public;
     index index.php;
 
     location / {
@@ -134,18 +134,18 @@ server {
 }
 ```
 
-Abre la web en el navegador. Si no existe ningun usuario local, Uanna mostrara la pagina de registro del primer administrador. Ese usuario podra crear y editar usuarios, configurar la instancia y administrar bloqueos.
+Open the site in a browser. If no local user exists yet, Uanna will show the first administrator registration page. That user can create and edit users, configure the instance, and manage blocks.
 
-## Actualizacion de colas
+## Queue Updates
 
-La recepcion y los envios ActivityPub se configuran desde el panel de administracion, en la caja `Actualizaciones`.
+Inbox and ActivityPub delivery processing are configured from the administration panel, in the `Updates` box.
 
-Hay dos modos:
+There are two modes:
 
-- `Actualizacion al detectarse actividad (lenta)`: Uanna procesa recepcion y envios de forma oportunista durante las visitas web normales. Cada peticion puede ejecutar un lote pequeno de inbox y entregas, con bloqueo de concurrencia y enfriamiento para no saturar la carga. No requiere cron, pero puede tardar mas si la instancia tiene poca actividad web.
-- `Usar cron`: Uanna no procesa colas durante las visitas. El administrador debe programar los comandos de cola en el crontab del servidor. Es el modo recomendado para instancias con mas trafico federado o para que todo avance aunque nadie visite la web durante horas.
+- `Update when activity is detected (slow)`: Uanna processes inbox and deliveries opportunistically during normal web visits. Each request may run a small inbox and delivery batch, with concurrency locking and cooldowns to avoid overloading the server. It does not require cron, but it can take longer if the instance has little web activity.
+- `Use cron`: Uanna does not process queues during visits. The administrator must schedule the queue commands in the server crontab. This is the recommended mode for instances with more federated traffic, or to keep work moving even when nobody visits the site for hours.
 
-Los limites se ajustan en `oannes/config/oannes.php`:
+Limits are adjusted in `oannes/config/oannes.php`:
 
 ```php
 'opportunistic_workers_enabled' => true,
@@ -154,47 +154,47 @@ Los limites se ajustan en `oannes/config/oannes.php`:
 'opportunistic_delivery_limit' => 2,
 ```
 
-Si eliges `Usar cron`, el panel calcula la ruta de la instalacion y muestra los comandos exactos para esa instancia. Los comandos base son:
+If you choose `Use cron`, the panel calculates the installation path and shows the exact commands for that instance. The base commands are:
 
 ```sh
 php oannes/bin/oannes.php queue-run 25
 php oannes/bin/oannes.php inbox-run 25
 ```
 
-Tambien muestra el bloque de `crontab` recomendado, sustituyendo `/ruta/a/uanna` por la ruta real. La recomendacion por defecto es ejecutar recepcion y envios cada minuto:
+It also shows the recommended `crontab` block, replacing `/path/to/uanna` with the real path. The default recommendation is to run inbox and deliveries every minute:
 
 ```cron
-* * * * * cd /ruta/a/uanna && php oannes/bin/oannes.php queue-run 25 >/dev/null 2>&1
-* * * * * cd /ruta/a/uanna && php oannes/bin/oannes.php inbox-run 25 >/dev/null 2>&1
+* * * * * cd /path/to/uanna && php oannes/bin/oannes.php queue-run 25 >/dev/null 2>&1
+* * * * * cd /path/to/uanna && php oannes/bin/oannes.php inbox-run 25 >/dev/null 2>&1
 ```
 
-El panel incluye ademas un comando para guardar esas lineas en el crontab del usuario actual.
+The panel also includes a command to save those lines to the current user's crontab.
 
-## App Android
+## Android App
 
-El repositorio incluye un proyecto Android ligero en `android/`. La app abre la instancia en una WebView a pantalla completa, mantiene la sesion, permite subir archivos y muestra notificaciones locales mientras esta abierta cuando sube el contador del panel.
+The repository includes a lightweight Android project in `android/`. The app opens the instance in a full-screen WebView, keeps the session, allows file uploads, and shows local notifications while it is open when the panel counter increases.
 
-Desde `Panel de administracion > Compilar app`, el administrador puede generar un APK para la instancia:
+From `Administration panel > Build app`, the administrator can generate an APK for the instance:
 
-- El nombre de la app se toma del nombre de instancia.
-- El icono se genera a partir del favicon de la instancia.
-- La URL cargada por la app se toma de `base_url`.
-- El APK resultante se publica en `oannes/public/assets/instance/uanna-app.apk`.
-- Cuando existe un APK compilado, todos los usuarios ven la caja `Descargar app` en su panel.
+- The app name is taken from the instance name.
+- The icon is generated from the instance favicon.
+- The URL loaded by the app is taken from `base_url`.
+- The resulting APK is published at `oannes/public/assets/instance/uanna-app.apk`.
+- When a compiled APK exists, all users see the `Download app` box in their panel.
 
-Si faltan dependencias, la caja `Compilar app` indica que debe instalarse. Para compilar en el servidor hacen falta:
+If dependencies are missing, the `Build app` box explains what must be installed. Building on the server requires:
 
 - JDK 17.
 - Gradle.
-- Android SDK con platform `android-35` y build-tools.
+- Android SDK with platform `android-35` and build-tools.
 
-En Debian/Ubuntu, el JDK puede instalarse con:
+On Debian/Ubuntu, the JDK can be installed with:
 
 ```sh
 sudo apt install openjdk-17-jdk
 ```
 
-Gradle y Android SDK pueden instalarse con Android Studio, con los command line tools de Android o dejando una toolchain local en:
+Gradle and the Android SDK can be installed with Android Studio, with Android command line tools, or by placing a local toolchain in:
 
 ```text
 android/.toolchain/jdk
@@ -202,9 +202,9 @@ android/.toolchain/gradle/current
 android/.toolchain/sdk
 ```
 
-La toolchain, los builds, APKs, claves y `local.properties` no forman parte del repositorio.
+The toolchain, builds, APKs, keys, and `local.properties` are not part of the repository.
 
-## Comandos utiles
+## Useful Commands
 
 ```sh
 php oannes/bin/oannes.php rebuild-index
@@ -215,48 +215,48 @@ php oannes/bin/oannes.php readiness 20
 php oannes/bin/oannes.php backfill-boosts 50
 ```
 
-## Exportacion e importacion de usuarios
+## User Export and Import
 
-Cada usuario puede descargar desde `Panel > Exportar / Migrar` un archivo ZIP de migracion. El paquete contiene:
+Each user can download a migration ZIP file from `Panel > Export / Migrate`. The package contains:
 
 ```text
-usuario-uanna.zip
+user-uanna.zip
 archive.xml
 media/
 ```
 
-`archive.xml` incluye el perfil y todos los posts locales del usuario. Si esos posts tienen imagenes o documentos adjuntos almacenados en la instancia, Uanna los copia dentro de `media/` y reescribe sus URLs como rutas relativas.
+`archive.xml` includes the profile and all local posts by the user. If those posts have images or document attachments stored in the instance, Uanna copies them into `media/` and rewrites their URLs as relative paths.
 
-Desde `Panel > Exportar / Migrar` el usuario tambien puede borrar todo su contenido o dar de baja su cuenta, escribiendo su nombre de usuario como confirmacion.
+From `Panel > Export / Migrate`, the user can also delete all their content or close their account, entering their username as confirmation.
 
-El administrador puede importar usuarios desde `Panel de administracion > Importar usuario`. La importacion acepta:
+The administrator can import users from `Administration panel > Import user`. Import accepts:
 
-- XML simple generado por Uanna.
-- ZIP completo generado por Uanna, con `archive.xml` y adjuntos.
+- Plain XML generated by Uanna.
+- Full ZIP generated by Uanna, with `archive.xml` and attachments.
 
-Al importar un ZIP, Uanna restaura los adjuntos en el directorio estatico del usuario de la nueva instancia, reescribe sus URLs publicas y reconstruye los indices. Si el usuario aun no existe, el administrador debe indicar una clave inicial.
+When importing a ZIP, Uanna restores attachments into the new instance user's static directory, rewrites their public URLs, and rebuilds indexes. If the user does not exist yet, the administrator must provide an initial password.
 
-Para migraciones desde snac:
+For migrations from snac:
 
 ```sh
-php oannes/bin/oannes.php analyse-snac /ruta/a/snac
-php oannes/bin/oannes.php import-snac /ruta/a/snac
+php oannes/bin/oannes.php analyse-snac /path/to/snac
+php oannes/bin/oannes.php import-snac /path/to/snac
 php oannes/bin/oannes.php rebuild-index
 php oannes/bin/oannes.php validate-threads
 ```
 
-### Identidad de actores al migrar desde snac
+### Actor Identity When Migrating From snac
 
-Las instalaciones nuevas de Uanna usan actores en `/u/usuario`:
+New Uanna installations use actors under `/u/user`:
 
 ```php
 'local_actor_path' => '/u',
 'legacy_actor_paths' => [],
 ```
 
-Si migras una instancia snac que ya federaba con actores en la raiz, por ejemplo `https://dominio.org/david`, conviene conservar esa identidad como primaria. De lo contrario, otros servidores pueden seguir al actor antiguo y no incorporar bien las publicaciones nuevas aunque reciban las entregas.
+If you migrate a snac instance that already federated with root-level actors, for example `https://domain.org/david`, it is advisable to preserve that identity as the primary one. Otherwise, other servers may still follow the old actor and fail to incorporate new posts correctly even if they receive the deliveries.
 
-En ese caso configura la instancia asi antes de publicar contenido nuevo:
+In that case, configure the instance like this before publishing new content:
 
 ```php
 'local_actor_path' => '',
@@ -265,25 +265,25 @@ En ese caso configura la instancia asi antes de publicar contenido nuevo:
 ],
 ```
 
-Con esa configuracion, el actor principal seguira siendo `https://dominio.org/usuario` y la ruta `/u/usuario` quedara como alias compatible. Usa esta opcion solo para migraciones que necesiten preservar identidades antiguas; para instalaciones nuevas es mejor mantener `/u/usuario`.
+With this configuration, the main actor remains `https://domain.org/user` and the `/u/user` route works as a compatible alias. Use this option only for migrations that need to preserve old identities; for new installations, keeping `/u/user` is better.
 
-## Politica de permisos
+## Permission Policy
 
-Uanna lee y escribe archivos JSON, XML y adjuntos directamente en disco. No usa base de datos, por lo que los permisos del sistema son parte de la instalacion.
+Uanna reads and writes JSON files, XML files, and attachments directly on disk. It does not use a database, so system permissions are part of the installation.
 
-La regla recomendada es:
+The recommended rule is:
 
-- El usuario que ejecuta PHP debe poder leer y escribir `oannes/data` y `oannes/public/assets`.
-- Todos esos directorios deben tener setgid (`2775`) para que los archivos nuevos hereden el grupo correcto.
-- Los archivos deben quedar en `0664` y los directorios en `2775`.
-- Las sesiones de `oannes/data/sessions` deben ser escribibles por el mismo grupo; Uanna intenta crearlas como `0660`.
-- Si se ejecutan comandos desde consola, el usuario shell debe pertenecer al mismo grupo que PHP.
-- No deben mezclarse propietarios incompatibles como `david` y `nobody` si el grupo no tiene escritura.
+- The user running PHP must be able to read and write `oannes/data` and `oannes/public/assets`.
+- All those directories should have setgid (`2775`) so new files inherit the correct group.
+- Files should be `0664` and directories `2775`.
+- Sessions in `oannes/data/sessions` must be writable by the same group; Uanna tries to create them as `0660`.
+- If commands are run from the console, the shell user must belong to the same group as PHP.
+- Incompatible owners such as `david` and `nobody` should not be mixed if the group does not have write access.
 
-Para reparar una instalacion existente:
+To repair an existing installation:
 
 ```sh
-cd /ruta/a/uanna
+cd /path/to/uanna
 
 WEB_USER=www-data
 WEB_GROUP=www-data
@@ -294,12 +294,12 @@ sudo find oannes/data oannes/public/assets -type f -exec chmod 0664 {} +
 sudo usermod -aG "$WEB_GROUP" "$USER"
 ```
 
-Despues de `usermod`, cierra sesion y vuelve a entrar para que el grupo se aplique a tu shell.
+After `usermod`, log out and log back in so the group applies to your shell.
 
-Si PHP esta corriendo realmente como `nobody`, la reparacion concreta seria:
+If PHP is actually running as `nobody`, the concrete repair would be:
 
 ```sh
-cd /ruta/a/uanna
+cd /path/to/uanna
 
 sudo chown -R nobody:nogroup oannes/data oannes/public/assets
 sudo find oannes/data oannes/public/assets -type d -exec chmod 2775 {} +
@@ -307,34 +307,32 @@ sudo find oannes/data oannes/public/assets -type f -exec chmod 0664 {} +
 sudo usermod -aG nogroup david
 ```
 
-Si el servidor usa `www-data`, cambia `nobody:nogroup` por `www-data:www-data`. Lo importante es que PHP y las tareas de consola trabajen sobre el mismo grupo escribible.
+If the server uses `www-data`, replace `nobody:nogroup` with `www-data:www-data`. The important point is that PHP and console tasks work on the same writable group.
 
-## Datos y copias de seguridad
+## Data and Backups
 
-Los datos vivos de una instancia estan en `oannes/data` y no forman parte del repositorio. Los adjuntos y archivos estaticos de usuarios viven en `oannes/data/media/<usuario>`. Haz copias de seguridad de `oannes/data` y `oannes/public/assets`.
+The live data of an instance is stored in `oannes/data` and is not part of the repository. Attachments and user static files live in `oannes/data/media/<user>`. Back up `oannes/data` and `oannes/public/assets`.
 
-No publiques nunca:
+Never publish:
 
 - `oannes/data`
 - `oannes/public/assets`
 - `oannes/config/oannes.php`
-- backups de migracion
-- claves locales, sesiones, colas o indices de una comunidad real
+- migration backups
+- local keys, sessions, queues, or indexes from a real community
 
-## Desarrollo local
+## Local Development
 
-Para probar sin configurar Apache o Nginx:
+To test without configuring Apache or Nginx:
 
 ```sh
 php -S 127.0.0.1:8000 -t oannes/public oannes/public/server.php
 ```
 
-Luego abre:
+Then open:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-En desarrollo local, la federacion real requiere HTTPS y un dominio accesible desde otros servidores.
-
-# uanna
+In local development, real federation requires HTTPS and a domain reachable by other servers.
