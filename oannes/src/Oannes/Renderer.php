@@ -561,6 +561,8 @@ final class Renderer
     {
         $attachments = $object['attachment'] ?? [];
         $attachments = is_array($attachments) && array_is_list($attachments) ? $attachments : [$attachments];
+        $objectId = ActivityPub::objectId($object) ?? '';
+        $postAnchor = $objectId !== '' ? $this->postAnchor($objectId) : '';
         $html = '';
 
         foreach ($attachments as $attachment) {
@@ -587,10 +589,27 @@ final class Renderer
             }
 
             $safeUrl = Html::escape($url);
+            $modalId = 'attachment-' . substr(Id::digest($objectId . "\n" . $url), 0, 16);
+            $safeModalId = Html::escape($modalId);
+            $backHref = $postAnchor !== '' ? '#' . Html::escape($postAnchor) : '#';
+            $safeAlt = Html::escape($alt);
             $html .= '<p class="post-attachment">'
-                . '<a href="' . $safeUrl . '" target="_blank" rel="noopener">Imagen adjunta</a>'
-                . ($alt !== '' ? ': ' . Html::escape($alt) : '')
-                . '</p>';
+                . '<a href="#' . $safeModalId . '">Imagen adjunta</a>'
+                . ($alt !== '' ? ': ' . $safeAlt : '')
+                . '</p>'
+                . '<section id="' . $safeModalId . '" class="modal-overlay attachment-modal-overlay" aria-label="Imagen adjunta">'
+                . '<a class="modal-backdrop" href="' . $backHref . '" aria-label="Volver"></a>'
+                . '<article class="attachment-modal">'
+                . '<figure>'
+                . '<img src="' . $safeUrl . '" alt="' . $safeAlt . '"/>'
+                . ($alt !== '' ? '<figcaption>' . $safeAlt . '</figcaption>' : '')
+                . '</figure>'
+                . '<nav class="attachment-modal-actions" aria-label="Acciones de imagen">'
+                . '<a class="button-link" href="' . $safeUrl . '" download>Descargar</a>'
+                . '<a class="button-link secondary" href="' . $backHref . '">Volver</a>'
+                . '</nav>'
+                . '</article>'
+                . '</section>';
         }
 
         return $html !== '' ? '<div class="post-attachments">' . $html . '</div>' : '';
