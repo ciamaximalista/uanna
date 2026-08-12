@@ -179,6 +179,9 @@ final class InboxService
     private function activityFingerprint(array $activity, string $body): string
     {
         $id = ActivityPub::objectId($activity);
+        if (($activity['type'] ?? null) === 'Update' && $id !== null) {
+            return Id::digest('Update' . "\n" . $id . "\n" . hash('sha256', $body));
+        }
 
         return Id::digest($id ?? $body);
     }

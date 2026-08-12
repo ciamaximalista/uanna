@@ -144,6 +144,24 @@ final class SimulationRunner
             $this->check('duplicate activity rejected', $e->getMessage() === 'Duplicate inbox activity');
         }
 
+        $update = [
+            'id' => $activity['id'],
+            'type' => 'Update',
+            'actor' => $env['remote_actor'],
+            'object' => [
+                'id' => 'https://remote.test/objects/reused-update-' . $iteration,
+                'type' => 'Note',
+                'attributedTo' => $env['remote_actor'],
+                'published' => gmdate('c'),
+                'updated' => gmdate('c'),
+                'content' => 'Updated object with reused activity id',
+            ],
+        ];
+        $this->receive($env, $update);
+        (new InboxWorker($env['store'], $env['queue']))->run();
+        $updatedObject = (new ObjectRepository($env['store']))->findByIdOrAlias($update['object']['id']);
+        $this->check('update with reused activity id accepted', $updatedObject !== null);
+
         $bad = $this->environment('bad-key-' . $iteration);
         $headers = (new HttpSignature())->signedPostHeaders(
             $bad['config']['base_url'] . '/u/ana/inbox',
