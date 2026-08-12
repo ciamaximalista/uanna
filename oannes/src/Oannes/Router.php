@@ -1026,6 +1026,19 @@ final class Router
             return;
         }
 
+        $duplicateId = $this->recentPostDuplicate(
+            $uid,
+            $content,
+            is_string($visibility) ? $visibility : 'public',
+            is_string($inReplyTo) ? $inReplyTo : '',
+            is_string($imageAlt) ? $imageAlt : '',
+            'image_upload'
+        );
+        if ($duplicateId !== null) {
+            header('Location: ?id=' . rawurlencode($duplicateId));
+            return;
+        }
+
         try {
             $attachment = (new MediaUploadService($this->config))->saveImageFromPost(
                 $uid,
@@ -1043,6 +1056,15 @@ final class Router
                 'inReplyTo' => is_string($inReplyTo) ? $inReplyTo : null,
                 'attachments' => $attachment !== null ? [$attachment] : [],
             ]);
+            $this->rememberRecentPost(
+                $uid,
+                $content,
+                is_string($visibility) ? $visibility : 'public',
+                is_string($inReplyTo) ? $inReplyTo : '',
+                is_string($imageAlt) ? $imageAlt : '',
+                'image_upload',
+                (string)$note['id']
+            );
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
             return;
@@ -2202,6 +2224,86 @@ final class Router
         }
 
         return array_values(array_unique($values));
+    }
+
+    private function recentPostDuplicate(string $uid, string $content, string $visibility, string $inReplyTo, string $imageAlt, string $fileField): ?string
+    {
+        $signature = $this->postSubmissionSignature($uid, $content, $visibility, $inReplyTo, $imageAlt, $fileField);
+        $recent = $this->recentPostSubmissions();
+        $record = $recent[$signature] ?? null;
+
+        if (!is_array($record)) {
+            return null;
+        }
+
+        $created = (int)($record['created'] ?? 0);
+        $id = $record['id'] ?? null;
+
+        return is_string($id) && $id !== '' && $created >= time() - 120 ? $id : null;
+    }
+
+    private function rememberRecentPost(string $uid, string $content, string $visibility, string $inReplyTo, string $imageAlt, string $fileField, string $id): void
+    {
+        if ($id === '') {
+            return;
+        }
+
+        $signature = $this->postSubmissionSignature($uid, $content, $visibility, $inReplyTo, $imageAlt, $fileField);
+        $recent = $this->recentPostSubmissions();
+        $now = time();
+        $recent[$signature] = [
+            'id' => $id,
+            'created' => $now,
+        ];
+
+        foreach ($recent as $key => $record) {
+            if (!is_array($record) || (int)($record['created'] ?? 0) < $now - 300) {
+                unset($recent[$key]);
+            }
+        }
+
+        $_SESSION['recent_post_submissions'] = $recent;
+    }
+
+    /**
+     * @return array<string, array{id?: string, created?: int}>
+     */
+    private function recentPostSubmissions(): array
+    {
+        $recent = $_SESSION['recent_post_submissions'] ?? [];
+        return is_array($recent) ? $recent : [];
+    }
+
+    private function postSubmissionSignature(string $uid, string $content, string $visibility, string $inReplyTo, string $imageAlt, string $fileField): string
+    {
+        return Id::digest(Json::encode([
+            'uid' => $uid,
+            'content' => trim($content),
+            'visibility' => $visibility,
+            'inReplyTo' => trim($inReplyTo),
+            'imageAlt' => trim($imageAlt),
+            'upload' => $this->uploadedFileSignature($fileField),
+        ]));
+    }
+
+    private function uploadedFileSignature(string $field): string
+    {
+        $file = $_FILES[$field] ?? null;
+        if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            return '';
+        }
+
+        $tmp = $file['tmp_name'] ?? null;
+        if (!is_string($tmp) || $tmp === '' || !is_uploaded_file($tmp)) {
+            return '';
+        }
+
+        $hash = hash_file('sha256', $tmp);
+        return Json::encode([
+            'name' => is_string($file['name'] ?? null) ? $file['name'] : '',
+            'size' => (int)($file['size'] ?? 0),
+            'hash' => is_string($hash) ? $hash : '',
+        ]);
     }
 
     private function privateMessageFromObject(array $object): ?array
