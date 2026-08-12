@@ -55,7 +55,7 @@ final class LocalUsers
             'avatar' => '',
             'header' => '',
             'email' => '',
-            'lang' => (string)($this->config['default_locale'] ?? 'es'),
+            'lang' => (new InstanceSettings($this->store, $this->config))->defaultLanguage(),
             'tz' => (string)($this->config['timezone'] ?? 'Europe/Madrid'),
             'approve_followers' => true,
             'admin' => $admin,

@@ -1226,6 +1226,10 @@ h3 {
     gap: 0 0.85rem;
 }
 
+.profile-language-field {
+    width: 100%;
+}
+
 .instance-form {
     display: grid;
     grid-template-columns: 1fr;

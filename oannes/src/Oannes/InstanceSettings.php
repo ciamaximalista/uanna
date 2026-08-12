@@ -35,7 +35,7 @@ final class InstanceSettings
             }
         }
 
-        foreach (['instance_name', 'presentation_html', 'update_mode'] as $field) {
+        foreach (['instance_name', 'presentation_html', 'update_mode', 'default_language'] as $field) {
             if (array_key_exists($field, $fields) && is_string($fields[$field])) {
                 $settings[$field] = trim($fields[$field]);
             }
@@ -70,6 +70,11 @@ final class InstanceSettings
     public function presentationHtml(): string
     {
         return $this->get('presentation_html', self::DEFAULT_PRESENTATION_HTML);
+    }
+
+    public function defaultLanguage(): string
+    {
+        return (new LanguageCatalog($this->store, $this->config))->defaultLanguage();
     }
 
     public function blockedServers(): array

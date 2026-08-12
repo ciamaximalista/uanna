@@ -703,18 +703,21 @@ final class Router
     {
         [$uid, $auth] = $this->requireInstanceAdmin();
         $settings = new InstanceSettings($this->store, $this->config);
+        $settingsData = $settings->all();
+        $settingsData['default_language'] ??= $settings->defaultLanguage();
 
         echo (new AdminRenderer($this->renderer, $auth))->instanceAdmin(
             $uid,
             $this->users->all(),
-            $settings->all(),
+            $settingsData,
             $settings->blockedServers(),
             $settings->blockedActors(),
             $settings->blockNotices(),
             $message,
             $error,
             $openBox,
-            (new AndroidAppBuilder($this->store, $this->config))->status()
+            (new AndroidAppBuilder($this->store, $this->config))->status(),
+            (new LanguageCatalog($this->store, $this->config))->available()
         );
     }
 
@@ -734,6 +737,10 @@ final class Router
                 if (is_string($_POST[$field] ?? null)) {
                     $fields[$field] = $_POST[$field];
                 }
+            }
+
+            if (is_string($_POST['default_language'] ?? null)) {
+                $fields['default_language'] = (new LanguageCatalog($this->store, $this->config))->validate($_POST['default_language']);
             }
 
             if (is_string($_POST['update_mode'] ?? null)) {
@@ -1166,7 +1173,9 @@ final class Router
                 'name' => $_POST['name'] ?? '',
                 'bio' => $_POST['bio'] ?? '',
                 'email' => $_POST['email'] ?? '',
-                'lang' => $_POST['lang'] ?? '',
+                'lang' => is_string($_POST['lang'] ?? null)
+                    ? (new LanguageCatalog($this->store, $this->config))->validate($_POST['lang'])
+                    : (new LanguageCatalog($this->store, $this->config))->defaultLanguage(),
                 'tz' => $_POST['tz'] ?? '',
                 'approve_followers' => isset($_POST['approve_followers']),
             ];
@@ -1869,6 +1878,7 @@ final class Router
             $timelineSearchQuery,
             $timelineSearchResults,
             (new AndroidAppBuilder($this->store, $this->config))->manifest(),
+            (new LanguageCatalog($this->store, $this->config))->available(),
         );
     }
 

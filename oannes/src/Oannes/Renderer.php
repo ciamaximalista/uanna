@@ -7,6 +7,7 @@ final class Renderer
     private readonly LocalUsers $users;
     private readonly ActorRepository $actors;
     private readonly InteractionService $interactions;
+    private readonly I18n $i18n;
     private array $actorInfoCache = [];
     private array $canonicalIdCache = [];
 
@@ -25,12 +26,19 @@ final class Renderer
             $this->actors,
             $this->config,
         );
+        $this->i18n = new I18n($store, $this->config);
+    }
+
+    public function t(string $key, string $fallback = '', array $params = []): string
+    {
+        return $this->i18n->t($key, $fallback, $params);
     }
 
     public function page(string $title, string $body): string
     {
         $settings = new InstanceSettings(new FileStore($this->config['data_dir']), $this->config);
         $instanceName = $settings->instanceName();
+        $language = Html::escape($this->i18n->language());
         $name = Html::escape($instanceName);
         $pageTitle = trim($title) === ''
             ? $instanceName
@@ -48,7 +56,7 @@ final class Renderer
         $footer = $this->siteFooter($name);
 
         return "<!doctype html>\n"
-            . "<html lang=\"es\"><head><meta charset=\"utf-8\"/>"
+            . '<html lang="' . $language . '"><head><meta charset="utf-8"/>'
             . "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>"
             . "<title>{$pageTitle}</title>"
             . "<link rel=\"icon\" type=\"image/png\" href=\"{$favicon}\"/>"
@@ -56,7 +64,7 @@ final class Renderer
             . "<link rel=\"stylesheet\" href=\"{$style}\"/>"
             . "<script defer src=\"{$cropScript}\"></script>"
             . "</head><body><header class=\"topbar\">{$brand}"
-            . "<nav class=\"navlinks\"><a href=\"{$home}\">Inicio</a>{$panelLink}{$adminLink}{$composer['button']}</nav></header>"
+            . "<nav class=\"navlinks\"><a href=\"{$home}\">" . Html::escape($this->t('nav.home', 'Inicio')) . "</a>{$panelLink}{$adminLink}{$composer['button']}</nav></header>"
             . "<main>{$body}</main>{$footer}{$composer['modal']}</body></html>";
     }
 
@@ -67,16 +75,16 @@ final class Renderer
         $uid = $auth->currentUser();
 
         if ($uid === null) {
-            return '<a href="' . $href . '">Panel</a>';
+            return '<a href="' . $href . '">' . Html::escape($this->t('nav.panel', 'Panel')) . '</a>';
         }
 
         $count = $this->panelAttentionCount($uid);
         if ($count <= 0) {
-            return '<a href="' . $href . '">Panel</a>';
+            return '<a href="' . $href . '">' . Html::escape($this->t('nav.panel', 'Panel')) . '</a>';
         }
 
         $target = Html::escape($this->publicUrl(['route' => 'admin', 'focus' => 'notifications']) . '#notifications');
-        return '<a class="panel-link has-badge" href="' . $target . '">Panel <span class="nav-badge">' . Html::escape((string)min($count, 99)) . '</span></a>';
+        return '<a class="panel-link has-badge" href="' . $target . '">' . Html::escape($this->t('nav.panel', 'Panel')) . ' <span class="nav-badge">' . Html::escape((string)min($count, 99)) . '</span></a>';
     }
 
     private function panelAttentionCount(string $uid): int
@@ -169,11 +177,13 @@ final class Renderer
 
     private function siteFooter(string $name): string
     {
-        return '<footer class="site-footer"><p>' . $name
-            . ' se hace con <a href="https://ruralnext.org/uanna" target="_blank" rel="noopener">Uanna</a>, '
-            . 'software libre con licencia <a href="https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12" target="_blank" rel="noopener">EUPL 1.2<img class="site-footer-logo eupl-logo" src="' . Html::escape($this->assetUrl('EUPL-logo-04.png')) . '" alt=""/></a> '
-            . 'desarrollado por <a href="https://maximalista.coop" target="_blank" rel="noopener">Compañía Maximalista S.Coop<img class="site-footer-logo" src="' . Html::escape($this->assetUrl('maximalista.png')) . '" alt=""/></a> '
-            . 'para <a href="https://ruralnext.org" target="_blank" rel="noopener">RuralNEXT</a>.</p></footer>';
+        return '<footer class="site-footer"><p>' . $this->t('footer.made_with', '{name} se hace con {uanna}, software libre con licencia {license} desarrollado por {company} para {ruralnext}.', [
+            'name' => $name,
+            'uanna' => '<a href="https://ruralnext.org/uanna" target="_blank" rel="noopener">Uanna</a>',
+            'license' => '<a href="https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12" target="_blank" rel="noopener">EUPL 1.2<img class="site-footer-logo eupl-logo" src="' . Html::escape($this->assetUrl('EUPL-logo-04.png')) . '" alt=""/></a>',
+            'company' => '<a href="https://maximalista.coop" target="_blank" rel="noopener">Compañía Maximalista S.Coop<img class="site-footer-logo" src="' . Html::escape($this->assetUrl('maximalista.png')) . '" alt=""/></a>',
+            'ruralnext' => '<a href="https://ruralnext.org" target="_blank" rel="noopener">RuralNEXT</a>',
+        ]) . '</p></footer>';
     }
 
     private function topbarBrand(string $home, string $fallbackName): string
@@ -208,7 +218,7 @@ final class Renderer
             return '';
         }
 
-        return '<a href="' . Html::escape($this->publicUrl(['route' => 'instance-admin'])) . '">Admin</a>';
+        return '<a href="' . Html::escape($this->publicUrl(['route' => 'instance-admin'])) . '">' . Html::escape($this->t('nav.admin', 'Admin')) . '</a>';
     }
 
     private function composerControls(): array
@@ -228,20 +238,20 @@ final class Renderer
         $reloadIcon = '<svg aria-hidden="true" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
 
         return [
-            'button' => '<a class="compose-trigger" href="#compose-modal" aria-label="Publicar">+</a>'
-                . '<a class="reload-trigger" href="' . $reloadUrl . '" aria-label="Recargar" title="Recargar">' . $reloadIcon . '</a>',
-            'modal' => '<section id="compose-modal" class="modal-overlay" aria-label="Publicar">'
-                . '<a class="modal-backdrop" href="#" aria-label="Cerrar"></a>'
+            'button' => '<a class="compose-trigger" href="#compose-modal" aria-label="' . Html::escape($this->t('post.publish', 'Publicar')) . '">+</a>'
+                . '<a class="reload-trigger" href="' . $reloadUrl . '" aria-label="' . Html::escape($this->t('actions.reload', 'Recargar')) . '" title="' . Html::escape($this->t('actions.reload', 'Recargar')) . '">' . $reloadIcon . '</a>',
+            'modal' => '<section id="compose-modal" class="modal-overlay" aria-label="' . Html::escape($this->t('post.publish', 'Publicar')) . '">'
+                . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.close', 'Cerrar')) . '"></a>'
                 . '<article class="compose-modal">'
-                . '<header><h2>Publicar</h2><a class="modal-close" href="#" aria-label="Cerrar">×</a></header>'
+                . '<header><h2>' . Html::escape($this->t('post.publish', 'Publicar')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.close', 'Cerrar')) . '">×</a></header>'
                 . '<form method="post" action="?route=admin/post" enctype="multipart/form-data">'
                 . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
-                . '<label>Texto <textarea name="content" rows="7" required></textarea></label>'
-                . '<label>Responder a <input name="inReplyTo" type="url" placeholder="https://..."/></label>'
-                . '<label>Visibilidad <select name="visibility"><option value="public">Pública</option><option value="followers">Seguidores</option></select></label>'
-                . '<label>Imagen <input name="image_upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp"/></label>'
-                . '<label>Texto alt <textarea name="image_alt" rows="3"></textarea></label>'
-                . '<button type="submit">Publicar</button>'
+                . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required></textarea></label>'
+                . '<label>' . Html::escape($this->t('field.reply_to', 'Responder a')) . ' <input name="inReplyTo" type="url" placeholder="https://..."/></label>'
+                . '<label>' . Html::escape($this->t('field.visibility', 'Visibilidad')) . ' <select name="visibility"><option value="public">' . Html::escape($this->t('visibility.public', 'Pública')) . '</option><option value="followers">' . Html::escape($this->t('visibility.followers_only', 'Sólo para seguidores')) . '</option></select></label>'
+                . '<label>' . Html::escape($this->t('field.image', 'Imagen')) . ' <input name="image_upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp"/></label>'
+                . '<label>' . Html::escape($this->t('field.alt_text', 'Texto alt')) . ' <textarea name="image_alt" rows="3"></textarea></label>'
+                . '<button type="submit">' . Html::escape($this->t('post.publish', 'Publicar')) . '</button>'
                 . '</form>'
                 . '</article>'
                 . '</section>',
@@ -273,7 +283,7 @@ final class Renderer
                     'csrf' => $csrf,
                 ],
             ])
-            : '<p class="muted">Todavía no hay publicaciones importadas de las cuentas que sigues.</p>';
+            : '<p class="muted">' . Html::escape($this->t('timeline.empty_following', 'Todavía no hay publicaciones importadas de las cuentas que sigues.')) . '</p>';
 
         return $this->page('', '<section class="timeline">' . $items . '</section>');
     }
@@ -285,7 +295,7 @@ final class Renderer
 
         if ($user === null) {
             http_response_code(404);
-            return $this->page('No encontrado', '<h1>No encontrado</h1>');
+            return $this->page($this->t('page.not_found', 'No encontrado'), '<h1>' . Html::escape($this->t('page.not_found', 'No encontrado')) . '</h1>');
         }
 
         $items = '';
@@ -322,7 +332,7 @@ final class Renderer
 
         if ($actorId === '' || $actor === null || $this->actorBlocked($actorId)) {
             http_response_code(404);
-            return $this->page('No encontrado', '<h1>No encontrado</h1>');
+            return $this->page($this->t('page.not_found', 'No encontrado'), '<h1>' . Html::escape($this->t('page.not_found', 'No encontrado')) . '</h1>');
         }
 
         foreach ($this->users->all() as $uid => $_user) {
@@ -350,7 +360,7 @@ final class Renderer
             . '<div class="profile-cover"></div>'
             . '<div class="profile-main"><a href="' . $externalUrl . '">' . $avatarHtml . '</a><div><h1>' . $name . '</h1>'
             . ($handle !== '' ? '<p class="meta">' . $handle . '</p>' : '')
-            . '<p class="meta"><a href="' . $externalUrl . '">Perfil original</a></p></div></div>'
+            . '<p class="meta"><a href="' . $externalUrl . '">' . Html::escape($this->t('profile.original', 'Perfil original')) . '</a></p></div></div>'
             . '</section><section class="timeline">' . $items . '</section>';
 
         return $this->page((string)$info['label'], $body);
@@ -413,7 +423,7 @@ final class Renderer
             }
         }
 
-        return $html !== '' ? $html : '<p class="muted">Todavía no hay publicaciones públicas.</p>';
+        return $html !== '' ? $html : '<p class="muted">' . Html::escape($this->t('timeline.empty_public', 'Todavía no hay publicaciones públicas.')) . '</p>';
     }
 
     private function profileThreadObjects(array $object): array
@@ -477,7 +487,7 @@ final class Renderer
 
         if ($object === null || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
             http_response_code(404);
-            return $this->page('No encontrado', '<h1>No encontrado</h1>');
+            return $this->page($this->t('page.not_found', 'No encontrado'), '<h1>' . Html::escape($this->t('page.not_found', 'No encontrado')) . '</h1>');
         }
 
         $title = $this->titleFor($object);
@@ -594,19 +604,19 @@ final class Renderer
             $backHref = $postAnchor !== '' ? '#' . Html::escape($postAnchor) : '#';
             $safeAlt = Html::escape($alt);
             $html .= '<p class="post-attachment">'
-                . '<a href="#' . $safeModalId . '">Imagen adjunta</a>'
+                . '<a href="#' . $safeModalId . '">' . Html::escape($this->t('attachment.image', 'Imagen adjunta')) . '</a>'
                 . ($alt !== '' ? ': ' . $safeAlt : '')
                 . '</p>'
-                . '<section id="' . $safeModalId . '" class="modal-overlay attachment-modal-overlay" aria-label="Imagen adjunta">'
-                . '<a class="modal-backdrop" href="' . $backHref . '" aria-label="Volver"></a>'
+                . '<section id="' . $safeModalId . '" class="modal-overlay attachment-modal-overlay" aria-label="' . Html::escape($this->t('attachment.image', 'Imagen adjunta')) . '">'
+                . '<a class="modal-backdrop" href="' . $backHref . '" aria-label="' . Html::escape($this->t('actions.back', 'Volver')) . '"></a>'
                 . '<article class="attachment-modal">'
                 . '<figure>'
                 . '<img src="' . $safeUrl . '" alt="' . $safeAlt . '"/>'
                 . ($alt !== '' ? '<figcaption>' . $safeAlt . '</figcaption>' : '')
                 . '</figure>'
-                . '<nav class="attachment-modal-actions" aria-label="Acciones de imagen">'
-                . '<a class="button-link" href="' . $safeUrl . '" download>Descargar</a>'
-                . '<a class="button-link secondary" href="' . $backHref . '">Volver</a>'
+                . '<nav class="attachment-modal-actions" aria-label="' . Html::escape($this->t('attachment.actions', 'Acciones de imagen')) . '">'
+                . '<a class="button-link" href="' . $safeUrl . '" download>' . Html::escape($this->t('actions.download', 'Descargar')) . '</a>'
+                . '<a class="button-link secondary" href="' . $backHref . '">' . Html::escape($this->t('actions.back', 'Volver')) . '</a>'
                 . '</nav>'
                 . '</article>'
                 . '</section>';
@@ -649,7 +659,7 @@ final class Renderer
             : '<span class="boost-avatar avatar-fallback">' . $initial . '</span>';
 
         return '<p class="boost-marker">'
-            . '<span>Impulsado por <a href="' . $url . '">' . $label . '</a></span> '
+            . '<span>' . Html::escape($this->t('post.boosted_by', 'Impulsado por')) . ' <a href="' . $url . '">' . $label . '</a></span> '
             . '<time datetime="' . Html::escape($boostedAt) . '">' . Html::escape($boostedHuman) . '</time> '
             . '<a class="boost-avatar-link" href="' . $url . '" aria-label="' . $label . '">' . $avatarHtml . '</a>'
             . '</p>';
@@ -680,17 +690,17 @@ final class Renderer
 
         foreach (ActivityPub::audience($object) as $target) {
             if (str_ends_with($target, '/followers')) {
-                return '<span class="visibility-badge followers">Sólo para seguidores</span>';
+                return '<span class="visibility-badge followers">' . Html::escape($this->t('visibility.followers_only', 'Sólo para seguidores')) . '</span>';
             }
         }
 
-        return '<span class="visibility-badge private">Privado</span>';
+        return '<span class="visibility-badge private">' . Html::escape($this->t('visibility.private', 'Privado')) . '</span>';
     }
 
     private function actionBar(string $id, array $interactionActors, ?array $actions, string $ownActions = ''): string
     {
-        $stats = $this->interactionAvatars('Favoritos', $interactionActors['likes'] ?? [])
-            . $this->interactionAvatars('Impulsos', $interactionActors['boosts'] ?? []);
+        $stats = $this->interactionAvatars($this->t('stats.favorites', 'Favoritos'), $interactionActors['likes'] ?? [])
+            . $this->interactionAvatars($this->t('stats.boosts', 'Impulsos'), $interactionActors['boosts'] ?? []);
 
         if ($actions === null || $id === '') {
             return '<footer class="post-actions post-stats">' . $stats . $ownActions . '</footer>';
@@ -701,8 +711,8 @@ final class Renderer
         $uid = (string)($actions['uid'] ?? '');
         $liked = $uid !== '' && $this->interactions->hasLocalReactionForCanonicalId($uid, $id, 'Like');
         $boosted = $uid !== '' && $this->interactions->hasLocalReactionForCanonicalId($uid, $id, 'Announce');
-        $likeLabel = $liked ? 'Quitar fav' : 'Favoritear';
-        $boostLabel = $boosted ? 'Quitar impulso' : 'Impulsar';
+        $likeLabel = $liked ? $this->t('actions.unfavorite', 'Quitar fav') : $this->t('actions.favorite', 'Favoritear');
+        $boostLabel = $boosted ? $this->t('actions.unboost', 'Quitar impulso') : $this->t('actions.boost', 'Impulsar');
         $replyModal = $this->replyModal($id, $csrf);
         $returnTo = Html::escape($this->currentPageWithAnchor($this->postAnchor($id)));
 
@@ -714,7 +724,7 @@ final class Renderer
             . '<button type="submit" name="type" value="Like">' . $likeLabel . '</button>'
             . '<button type="submit" name="type" value="Announce">' . $boostLabel . '</button>'
             . '</form>'
-            . '<a class="button-link reply-link" href="#reply-' . Html::escape(substr(Id::digest($id), 0, 12)) . '">Responder</a>'
+            . '<a class="button-link reply-link" href="#reply-' . Html::escape(substr(Id::digest($id), 0, 12)) . '">' . Html::escape($this->t('actions.reply', 'Responder')) . '</a>'
             . $ownActions
             . '<div class="post-stats">' . $stats . '</div>'
             . $replyModal
@@ -726,18 +736,18 @@ final class Renderer
         $suffix = Html::escape(substr(Id::digest($id), 0, 12));
         $encodedId = Html::escape($id);
 
-        return '<section id="reply-' . $suffix . '" class="modal-overlay" aria-label="Responder">'
-            . '<a class="modal-backdrop" href="#" aria-label="Cerrar"></a>'
+        return '<section id="reply-' . $suffix . '" class="modal-overlay" aria-label="' . Html::escape($this->t('actions.reply', 'Responder')) . '">'
+            . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.close', 'Cerrar')) . '"></a>'
             . '<article class="compose-modal">'
-            . '<header><h2>Responder</h2><a class="modal-close" href="#" aria-label="Cerrar">×</a></header>'
+            . '<header><h2>' . Html::escape($this->t('actions.reply', 'Responder')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.close', 'Cerrar')) . '">×</a></header>'
             . '<form method="post" action="?route=admin/post" enctype="multipart/form-data">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="inReplyTo" value="' . $encodedId . '"/>'
-            . '<label>Texto <textarea name="content" rows="7" required></textarea></label>'
-            . '<label>Visibilidad <select name="visibility"><option value="public">Pública</option><option value="followers">Seguidores</option></select></label>'
-            . '<label>Imagen <input name="image_upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp"/></label>'
-            . '<label>Texto alt <textarea name="image_alt" rows="3"></textarea></label>'
-            . '<div class="modal-actions"><button type="submit">Enviar</button><a class="button-link secondary" href="#">Cancelar</a></div>'
+            . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required></textarea></label>'
+            . '<label>' . Html::escape($this->t('field.visibility', 'Visibilidad')) . ' <select name="visibility"><option value="public">' . Html::escape($this->t('visibility.public', 'Pública')) . '</option><option value="followers">' . Html::escape($this->t('visibility.followers_only', 'Sólo para seguidores')) . '</option></select></label>'
+            . '<label>' . Html::escape($this->t('field.image', 'Imagen')) . ' <input name="image_upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp"/></label>'
+            . '<label>' . Html::escape($this->t('field.alt_text', 'Texto alt')) . ' <textarea name="image_alt" rows="3"></textarea></label>'
+            . '<div class="modal-actions"><button type="submit">' . Html::escape($this->t('actions.send', 'Enviar')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '</a></div>'
             . '</form>'
             . '</article>'
             . '</section>';
@@ -779,28 +789,28 @@ final class Renderer
         $source = Html::escape((string)($object['sourceContent'] ?? strip_tags((string)($object['content'] ?? ''))));
 
         return '<div class="own-post-actions">'
-            . '<a class="button-link secondary" href="#edit-' . $suffix . '">Editar</a>'
-            . '<a class="button-link secondary danger-link" href="#delete-' . $suffix . '">Borrar</a>'
+            . '<a class="button-link secondary" href="#edit-' . $suffix . '">' . Html::escape($this->t('actions.edit', 'Editar')) . '</a>'
+            . '<a class="button-link secondary danger-link" href="#delete-' . $suffix . '">' . Html::escape($this->t('actions.delete', 'Borrar')) . '</a>'
             . '</div>'
-            . '<section id="edit-' . $suffix . '" class="modal-overlay" aria-label="Editar publicación">'
-            . '<a class="modal-backdrop" href="#" aria-label="Cancelar"></a>'
-            . '<article class="compose-modal"><header><h2>Editar</h2><a class="modal-close" href="#" aria-label="Cancelar">×</a></header>'
+            . '<section id="edit-' . $suffix . '" class="modal-overlay" aria-label="' . Html::escape($this->t('post.edit', 'Editar publicación')) . '">'
+            . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '"></a>'
+            . '<article class="compose-modal"><header><h2>' . Html::escape($this->t('actions.edit', 'Editar')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '">×</a></header>'
             . '<form method="post" action="?route=admin/post-edit" enctype="multipart/form-data">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
-            . '<label>Texto <textarea name="content" rows="7" required>' . $source . '</textarea></label>'
-            . '<label>Imagen adjunta <input name="image_upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp"/></label>'
-            . '<label>Texto alt <textarea name="image_alt" rows="3"></textarea></label>'
-            . '<div class="modal-actions"><button type="submit">Enviar</button><a class="button-link secondary" href="#">Cancelar</a></div>'
+            . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required>' . $source . '</textarea></label>'
+            . '<label>' . Html::escape($this->t('attachment.image', 'Imagen adjunta')) . ' <input name="image_upload" type="file" accept="image/png,image/jpeg,image/gif,image/webp"/></label>'
+            . '<label>' . Html::escape($this->t('field.alt_text', 'Texto alt')) . ' <textarea name="image_alt" rows="3"></textarea></label>'
+            . '<div class="modal-actions"><button type="submit">' . Html::escape($this->t('actions.send', 'Enviar')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '</a></div>'
             . '</form></article></section>'
-            . '<section id="delete-' . $suffix . '" class="modal-overlay" aria-label="Borrar publicación">'
-            . '<a class="modal-backdrop" href="#" aria-label="No"></a>'
-            . '<article class="compose-modal"><header><h2>Borrar</h2><a class="modal-close" href="#" aria-label="No">×</a></header>'
-            . '<p>¿Seguro que quieres borrar esta publicación?</p>'
+            . '<section id="delete-' . $suffix . '" class="modal-overlay" aria-label="' . Html::escape($this->t('post.delete', 'Borrar publicación')) . '">'
+            . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.no', 'No')) . '"></a>'
+            . '<article class="compose-modal"><header><h2>' . Html::escape($this->t('actions.delete', 'Borrar')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.no', 'No')) . '">×</a></header>'
+            . '<p>' . Html::escape($this->t('post.delete_confirm', '¿Seguro que quieres borrar esta publicación?')) . '</p>'
             . '<form method="post" action="?route=admin/post-delete">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
-            . '<div class="modal-actions"><button type="submit" class="danger">Sí</button><a class="button-link secondary" href="#">No</a></div>'
+            . '<div class="modal-actions"><button type="submit" class="danger">' . Html::escape($this->t('actions.yes', 'Sí')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.no', 'No')) . '</a></div>'
             . '</form></article></section>';
     }
 
@@ -1026,7 +1036,7 @@ final class Renderer
             . '<header class="object-head">'
             . '<a class="post-avatar-link instance-avatar" href="' . Html::escape($this->publicUrl()) . '" aria-label="' . $name . '">'
             . '<img class="post-avatar instance-favicon-avatar" src="' . $favicon . '" alt=""/>'
-            . '</a><div><p class="meta post-meta"><strong>' . $name . '</strong><br/>Presentación</p></div></header>'
+            . '</a><div><p class="meta post-meta"><strong>' . $name . '</strong><br/>' . Html::escape($this->t('home.presentation', 'Presentación')) . '</p></div></header>'
             . '<div class="content">' . $content . '</div>'
             . '</article>';
     }
@@ -1113,7 +1123,7 @@ final class Renderer
         }
 
         return $this->actorInfoCache[$actorId] = [
-            'label' => $name !== '' ? $name : 'Autor desconocido',
+            'label' => $name !== '' ? $name : $this->t('post.unknown_author', 'Autor desconocido'),
             'avatar' => $avatar,
             'initial' => $this->initial($name !== '' ? $name : '?'),
             'url' => $this->actorUrl($actor, $actorId),
@@ -1188,7 +1198,7 @@ final class Renderer
             return $this->plainSnippet($content);
         }
 
-        return ActivityPub::objectId($object) ?? 'Objeto';
+        return ActivityPub::objectId($object) ?? $this->t('post.object', 'Objeto');
     }
 
     private function plainSnippet(string $html): string
@@ -1211,7 +1221,7 @@ final class Renderer
             return Html::safeContent($this->linkUrlsInHtmlText($content));
         }
 
-        return '<p class="muted">Sin contenido textual.</p>';
+        return '<p class="muted">' . Html::escape($this->t('post.no_text_content', 'Sin contenido textual.')) . '</p>';
     }
 
     private function linkTextEntities(string $text): string
