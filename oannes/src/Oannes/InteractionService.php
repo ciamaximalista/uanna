@@ -321,17 +321,6 @@ final class InteractionService
     {
         $items = [];
 
-        foreach (glob(dirname($this->store->dataDir()) . '/../user/*/notify/*.json') ?: [] as $file) {
-            $record = $this->readJsonFile($file);
-            $activity = is_array($record['msg'] ?? null) ? $record['msg'] : $record;
-            $target = $record['objid'] ?? $activity['object'] ?? null;
-            $actor = is_string($activity['actor'] ?? null) ? $activity['actor'] : '';
-
-            if (is_string($target) && !$this->actorBlocked($actor) && in_array($activity['type'] ?? '', ['Like', 'Announce'], true) && !$this->isReplyMentionAnnounce($activity)) {
-                $items[$target][] = $activity;
-            }
-        }
-
         foreach (glob($this->store->dataDir() . '/interactions/local/*/*.json') ?: [] as $file) {
             $activity = $this->readJsonFile($file);
             $target = $activity['object'] ?? null;

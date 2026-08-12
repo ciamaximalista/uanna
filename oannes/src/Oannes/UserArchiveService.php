@@ -355,8 +355,7 @@ final class UserArchiveService
             return null;
         }
 
-        $root = rtrim((string)($this->config['root_dir'] ?? dirname(__DIR__, 3)), '/');
-        $localPath = $root . '/user/' . $uid . '/static/' . $fileName;
+        $localPath = rtrim((string)$this->config['data_dir'], '/') . '/media/' . $uid . '/' . $fileName;
 
         return is_file($localPath) ? $localPath : null;
     }
@@ -370,8 +369,7 @@ final class UserArchiveService
 
         $extension = $this->extensionForMediaType($mediaType, $path);
         $fileName = 'media-uanna-' . substr(hash('sha256', $bytes), 0, 24) . '.' . $extension;
-        $root = rtrim((string)($this->config['root_dir'] ?? dirname(__DIR__, 3)), '/');
-        $dir = $root . '/user/' . $uid . '/static';
+        $dir = rtrim((string)$this->config['data_dir'], '/') . '/media/' . $uid;
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             throw new RuntimeException('No se pudo preparar el directorio de adjuntos.');
         }

@@ -19,6 +19,7 @@ Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni 
 - Adjuntos de imagen con texto alternativo.
 - Edicion y borrado de publicaciones propias con envio de actividades ActivityPub.
 - Panel de usuario con perfil, notificaciones, seguidores, seguidos, busqueda y mensajes privados.
+- Interfaz multidioma por archivos JSON, con idioma por defecto de instancia e idioma elegido por cada usuario.
 - Exportacion de usuario desde el panel en ZIP, con `archive.xml` y adjuntos locales incluidos.
 - Notificaciones con contador de no leidas y pendientes, enlaces a perfiles originales y publicaciones afectadas.
 - Panel de administracion para configurar imagenes, nombre, presentacion, usuarios, actualizaciones y bloqueos.
@@ -39,7 +40,7 @@ Uanna se distribuye bajo la Licencia Publica de la Union Europea, version 1.2, E
 - Servidor web con soporte PHP, por ejemplo Apache con PHP-FPM, Nginx con PHP-FPM o el servidor integrado de PHP para pruebas.
 - Extensiones PHP: `json`, `openssl`, `mbstring`, `fileinfo`, `gd`, `dom` y `zip`.
 - Un dominio con HTTPS valido para federar correctamente.
-- Permisos de escritura para PHP en `oannes/data`, `user` y `oannes/public/assets`.
+- Permisos de escritura para PHP en `oannes/data` y `oannes/public/assets`.
 - Opcional para compilar app Android desde el panel: JDK 17, Gradle y Android SDK con platform/build-tools compatibles.
 
 ## Instalacion
@@ -74,10 +75,10 @@ cd /ruta/a/uanna
 WEB_USER=www-data
 WEB_GROUP=www-data
 
-sudo install -d -m 2775 -o "$WEB_USER" -g "$WEB_GROUP" oannes/data user oannes/public/assets
-sudo chown -R "$WEB_USER:$WEB_GROUP" oannes/data user oannes/public/assets
-sudo find oannes/data user oannes/public/assets -type d -exec chmod 2775 {} +
-sudo find oannes/data user oannes/public/assets -type f -exec chmod 0664 {} +
+sudo install -d -m 2775 -o "$WEB_USER" -g "$WEB_GROUP" oannes/data oannes/public/assets
+sudo chown -R "$WEB_USER:$WEB_GROUP" oannes/data oannes/public/assets
+sudo find oannes/data oannes/public/assets -type d -exec chmod 2775 {} +
+sudo find oannes/data oannes/public/assets -type f -exec chmod 0664 {} +
 
 # Opcional, solo si vas a ejecutar comandos de mantenimiento desde tu usuario shell.
 sudo usermod -aG "$WEB_GROUP" "$USER"
@@ -272,7 +273,7 @@ Uanna lee y escribe archivos JSON, XML y adjuntos directamente en disco. No usa 
 
 La regla recomendada es:
 
-- El usuario que ejecuta PHP debe poder leer y escribir `oannes/data`, `user` y `oannes/public/assets`.
+- El usuario que ejecuta PHP debe poder leer y escribir `oannes/data` y `oannes/public/assets`.
 - Todos esos directorios deben tener setgid (`2775`) para que los archivos nuevos hereden el grupo correcto.
 - Los archivos deben quedar en `0664` y los directorios en `2775`.
 - Las sesiones de `oannes/data/sessions` deben ser escribibles por el mismo grupo; Uanna intenta crearlas como `0660`.
@@ -287,22 +288,22 @@ cd /ruta/a/uanna
 WEB_USER=www-data
 WEB_GROUP=www-data
 
-sudo chown -R "$WEB_USER:$WEB_GROUP" oannes/data user oannes/public/assets
-sudo find oannes/data user oannes/public/assets -type d -exec chmod 2775 {} +
-sudo find oannes/data user oannes/public/assets -type f -exec chmod 0664 {} +
+sudo chown -R "$WEB_USER:$WEB_GROUP" oannes/data oannes/public/assets
+sudo find oannes/data oannes/public/assets -type d -exec chmod 2775 {} +
+sudo find oannes/data oannes/public/assets -type f -exec chmod 0664 {} +
 sudo usermod -aG "$WEB_GROUP" "$USER"
 ```
 
 Despues de `usermod`, cierra sesion y vuelve a entrar para que el grupo se aplique a tu shell.
 
-En maximalismo.red se han visto directorios creados por `nobody:nogroup`, asi que si PHP esta corriendo realmente como `nobody`, la reparacion concreta seria:
+Si PHP esta corriendo realmente como `nobody`, la reparacion concreta seria:
 
 ```sh
-cd /var/www/html/puntored
+cd /ruta/a/uanna
 
-sudo chown -R nobody:nogroup oannes/data user oannes/public/assets
-sudo find oannes/data user oannes/public/assets -type d -exec chmod 2775 {} +
-sudo find oannes/data user oannes/public/assets -type f -exec chmod 0664 {} +
+sudo chown -R nobody:nogroup oannes/data oannes/public/assets
+sudo find oannes/data oannes/public/assets -type d -exec chmod 2775 {} +
+sudo find oannes/data oannes/public/assets -type f -exec chmod 0664 {} +
 sudo usermod -aG nogroup david
 ```
 
@@ -310,12 +311,11 @@ Si el servidor usa `www-data`, cambia `nobody:nogroup` por `www-data:www-data`. 
 
 ## Datos y copias de seguridad
 
-Los datos vivos de una instancia estan en `oannes/data` y no forman parte del repositorio. Los adjuntos y archivos estaticos de usuarios viven en `user/<usuario>/static`. Haz copias de seguridad de `oannes/data`, `user` y `oannes/public/assets`.
+Los datos vivos de una instancia estan en `oannes/data` y no forman parte del repositorio. Los adjuntos y archivos estaticos de usuarios viven en `oannes/data/media/<usuario>`. Haz copias de seguridad de `oannes/data` y `oannes/public/assets`.
 
 No publiques nunca:
 
 - `oannes/data`
-- `user`
 - `oannes/public/assets`
 - `oannes/config/oannes.php`
 - backups de migracion

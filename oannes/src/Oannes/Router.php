@@ -2057,11 +2057,10 @@ final class Router
 
     private function latestNotifications(string $uid, int $limit = 12): array
     {
-        $root = dirname($this->store->dataDir(), 2);
         $relations = new SocialRelationService($this->store);
         $items = [];
 
-        foreach (glob($root . '/user/' . $uid . '/notify/*.json') ?: [] as $file) {
+        foreach (glob($this->store->dataDir() . '/users/' . rawurlencode($uid) . '/notify/*.json') ?: [] as $file) {
             try {
                 $record = Json::decodeFile($file);
             } catch (\Throwable) {
@@ -2097,8 +2096,7 @@ final class Router
 
     private function latestPrivateMessages(string $uid, int $limit = 30): array
     {
-        $root = dirname($this->store->dataDir(), 2);
-        $idx = $root . '/user/' . $uid . '/private.idx';
+        $idx = $this->store->dataDir() . '/users/' . rawurlencode($uid) . '/private.idx';
         $relations = new SocialRelationService($this->store);
         $messages = [];
         $hashes = is_file($idx) ? (file($idx, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) : [];
@@ -2109,7 +2107,7 @@ final class Router
                 continue;
             }
 
-            $file = $root . '/user/' . $uid . '/private/' . $hash . '.json';
+            $file = $this->store->dataDir() . '/users/' . rawurlencode($uid) . '/private/' . $hash . '.json';
             if (!is_file($file)) {
                 continue;
             }

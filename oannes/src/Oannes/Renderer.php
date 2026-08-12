@@ -95,10 +95,9 @@ final class Renderer
     private function unreadNotificationCount(string $uid): int
     {
         $seen = $this->notificationsSeenAt($uid);
-        $root = dirname((string)$this->config['data_dir'], 2);
         $count = 0;
 
-        foreach (glob($root . '/user/' . $uid . '/notify/*.json') ?: [] as $file) {
+        foreach (glob((string)$this->config['data_dir'] . '/users/' . rawurlencode($uid) . '/notify/*.json') ?: [] as $file) {
             try {
                 $record = Json::decodeFile($file);
             } catch (\Throwable) {

@@ -317,7 +317,7 @@ final class SimulationRunner
         $users = new LocalUsers($env['store'], $env['config']);
         $post = (new PostService($env['store'], $users, $env['queue'], new SocialGraph($env['store']), $env['config']))
             ->createNote('ana', 'Archive me ' . $iteration);
-        $mediaDir = rtrim((string)$env['config']['root_dir'], '/') . '/user/ana/static';
+        $mediaDir = rtrim((string)$env['config']['data_dir'], '/') . '/media/ana';
         if (!is_dir($mediaDir) && !mkdir($mediaDir, 0775, true) && !is_dir($mediaDir)) {
             throw new RuntimeException('Cannot create simulation media dir');
         }
@@ -562,11 +562,8 @@ final class SimulationRunner
             new ActorRepository($env['store']),
             $env['config'],
         ))->counts($object);
-        $notifyRoot = dirname($env['store']->dataDir(), 2);
-        if ($notifyRoot === '/') {
-            $notifyRoot = $env['store']->dataDir();
-        }
-        $notify = $env['store']->readJson($notifyRoot . '/user/ana/notify/' . Id::digest('Webmention:' . $sourceUrl . ':' . $object['id']) . '.json');
+        $notifyRoot = $env['store']->dataDir();
+        $notify = $env['store']->readJson($notifyRoot . '/users/ana/notify/' . Id::digest('Webmention:' . $sourceUrl . ':' . $object['id']) . '.json');
 
         $this->check('reply announce does not count as boost', ($counts['boosts'] ?? 0) === 0);
         $this->check('reply announce becomes webmention', ($notify['type'] ?? null) === 'Webmention' && ($notify['actor'] ?? null) === $sourceUrl);

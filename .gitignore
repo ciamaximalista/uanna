@@ -2,10 +2,7 @@
 /oannes/data/
 /oannes/backups/
 /oannes/public/assets/
-/oannes/deploy/oannes-puntored.service
-/oannes/bin/start-httpd.sh
 /oannes/bin/start-snac-httpd.sh
-/oannes/docs/MIGRATION_FROM_SNAC.md
 
 # Local instance configuration. Publish oannes.example.php instead.
 /oannes/config/oannes.php
@@ -50,7 +47,7 @@ gradle-app.setting
 build/
 captures/
 
-# Legacy snac/maximalismo.red data that must not be published with Uanna.
+# Legacy snac data that must not be published with Uanna.
 /badlogin/
 /failure/
 /inbox/

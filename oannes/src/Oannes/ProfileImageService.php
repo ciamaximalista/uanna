@@ -62,7 +62,7 @@ final class ProfileImageService
 
         imagecopyresampled($target, $source, 0, 0, $cropX, $cropY, $width, $height, $cropW, $cropH);
 
-        $dir = dirname(__DIR__, 3) . '/user/' . $uid . '/static';
+        $dir = rtrim((string)$this->config['data_dir'], '/') . '/media/' . $uid;
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             throw new \RuntimeException('No se pudo crear el directorio de imágenes.');
         }

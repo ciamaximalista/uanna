@@ -484,7 +484,7 @@ final class InboxWorker
         $root = $this->notificationRoot();
         $id = Id::digest($type . ':' . $actor . ':' . $objid);
 
-        $this->store->writeJson($root . '/user/' . rawurlencode($localUid) . '/notify/' . $id . '.json', [
+        $this->store->writeJson($root . '/users/' . rawurlencode($localUid) . '/notify/' . $id . '.json', [
             'type' => $type,
             'utype' => $type,
             'actor' => $actor,
@@ -495,9 +495,7 @@ final class InboxWorker
 
     private function notificationRoot(): string
     {
-        $root = dirname($this->store->dataDir(), 2);
-
-        return $root !== '/' ? $root : $this->store->dataDir();
+        return $this->store->dataDir();
     }
 
     private function remoteInteractionPath(string $localUid, string $actor, string $type, string $object): string

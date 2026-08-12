@@ -54,8 +54,7 @@ final class MediaUploadService
             default => 'jpg',
         };
         $fileName = 'media-oannes-' . substr(hash('sha256', $bytes), 0, 24) . '.' . $extension;
-        $root = rtrim((string)($this->config['root_dir'] ?? dirname(__DIR__, 3)), '/');
-        $dir = $root . '/user/' . $uid . '/static';
+        $dir = rtrim((string)$this->config['data_dir'], '/') . '/media/' . $uid;
 
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             throw new \RuntimeException('No se pudo preparar el directorio de adjuntos.');
@@ -64,7 +63,7 @@ final class MediaUploadService
         @chmod($dir, 02775);
 
         if (!is_writable($dir)) {
-            throw new \RuntimeException('No se puede escribir en el directorio de adjuntos. Revisa permisos de user/' . $uid . '/static.');
+            throw new \RuntimeException('No se puede escribir en el directorio de adjuntos. Revisa permisos de oannes/data/media/' . $uid . '.');
         }
 
         $target = $dir . '/' . $fileName;

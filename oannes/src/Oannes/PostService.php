@@ -449,8 +449,6 @@ final class PostService
 
     private function notifyLocalMentions(string $authorUid, array $note, array $create, array $mentions): void
     {
-        $root = dirname($this->store->dataDir(), 2);
-
         foreach ($mentions as $mention) {
             $localUid = $mention['local_uid'] ?? null;
             if (!is_string($localUid) || $localUid === '' || $localUid === $authorUid) {
@@ -458,7 +456,7 @@ final class PostService
             }
 
             $id = sprintf('%.6F', microtime(true));
-            $this->store->writeJson($root . '/user/' . $localUid . '/notify/' . $id . '.json', [
+            $this->store->writeJson($this->store->dataDir() . '/users/' . rawurlencode($localUid) . '/notify/' . $id . '.json', [
                 'id' => $id,
                 'type' => 'Mention',
                 'utype' => 'Create',
@@ -552,7 +550,6 @@ final class PostService
             return;
         }
 
-        $root = dirname($this->store->dataDir(), 2);
         $hash = md5($id);
 
         foreach (ActivityPub::audience($note) as $actorId) {
@@ -561,9 +558,9 @@ final class PostService
                 continue;
             }
 
-            $privateDir = $root . '/user/' . $localUid . '/private';
+            $privateDir = $this->store->dataDir() . '/users/' . rawurlencode($localUid) . '/private';
             $this->store->writeJson($privateDir . '/' . $hash . '.json', $note);
-            $this->appendPrivateIndex($root . '/user/' . $localUid . '/private.idx', $hash);
+            $this->appendPrivateIndex($this->store->dataDir() . '/users/' . rawurlencode($localUid) . '/private.idx', $hash);
         }
     }
 
