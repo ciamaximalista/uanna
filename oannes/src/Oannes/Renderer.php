@@ -393,6 +393,7 @@ final class Renderer
     {
         $html = '';
         $renderedRoots = [];
+        $lastDay = null;
 
         foreach ($objects as $object) {
             if (!is_array($object)) {
@@ -415,6 +416,7 @@ final class Renderer
                     $renderedRoots[$rootId] = true;
                 }
 
+                $html .= $this->timelineDaySeparator($node['object'], $lastDay);
                 $html .= $this->objectCard($node['object'], false, [
                     'children' => $node['children'] ?? [],
                     'actions' => $actions,
@@ -503,9 +505,13 @@ final class Renderer
         $html = '';
         $objects = $this->withMissingParents($objects);
         $tree = $this->treeFor($objects);
+        $lastDay = null;
 
         foreach ($tree as $node) {
             if (is_array($node['object'] ?? null)) {
+                if (!$child) {
+                    $html .= $this->timelineDaySeparator($node['object'], $lastDay);
+                }
                 $html .= $this->objectCard($node['object'], $child, [
                     'children' => $node['children'] ?? [],
                     'actions' => $options['actions'] ?? null,
@@ -514,6 +520,36 @@ final class Renderer
         }
 
         return $html;
+    }
+
+    private function timelineDaySeparator(array $object, ?string &$lastDay): string
+    {
+        $date = $this->timelineSortDate($object);
+        $timezone = (string)($this->config['timezone'] ?? 'Europe/Madrid');
+        $day = DateFormat::dayKey($date, $timezone);
+        if ($day === '') {
+            return '';
+        }
+
+        if ($lastDay === null) {
+            $lastDay = $day;
+            return '';
+        }
+
+        if ($day === $lastDay) {
+            return '';
+        }
+
+        $lastDay = $day;
+        $label = DateFormat::day($date, $timezone);
+
+        return '<div class="timeline-day-separator" aria-label="' . Html::escape($label) . '"><span>' . Html::escape($label) . '</span></div>';
+    }
+
+    private function timelineSortDate(array $object): string
+    {
+        $boostedAt = $object['_oannes_boosted_at'] ?? null;
+        return is_string($boostedAt) && $boostedAt !== '' ? $boostedAt : ActivityPub::published($object);
     }
 
     private function objectCard(array $object, bool $child, array $options = []): string
