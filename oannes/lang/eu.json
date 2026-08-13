@@ -161,6 +161,7 @@
     "profile.approve_followers": "Jarraitzaileak eskuz onartu",
     "profile.change_password": "Pasahitza aldatu",
     "profile.current_password": "Oraingo pasahitza",
+    "profile.email_visibility": "Jarraitzen dituzun eta zuk edo instantziak blokeatu ez dituzten pertsonek bakarrik ikusiko dute.",
     "profile.new_password": "Pasahitz berria",
     "profile.original": "Jatorrizko profila",
     "profile.repeat_new_password": "Pasahitz berria errepikatu",

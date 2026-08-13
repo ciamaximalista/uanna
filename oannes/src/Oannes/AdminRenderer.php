@@ -369,7 +369,7 @@ final class AdminRenderer
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<div class="form-grid">'
             . '<label>' . Html::escape($this->t('field.name', 'Nombre')) . ' <input name="name" value="' . $name . '" autocomplete="name"/></label>'
-            . '<label>' . Html::escape($this->t('field.email', 'Email')) . ' <input name="email" type="email" value="' . $email . '" autocomplete="email"/></label>'
+            . '<label>' . Html::escape($this->t('field.email', 'Email')) . ' <input name="email" type="email" value="' . $email . '" autocomplete="email"/><span class="field-help">' . Html::escape($this->t('profile.email_visibility', 'Sólo lo verán las personas a las que sigas y que no estén bloqueadas por ti ni por la instancia.')) . '</span></label>'
             . '<label>' . Html::escape($this->t('field.timezone', 'Zona horaria')) . ' <input name="tz" value="' . $tz . '"/></label>'
             . '</div>'
             . $languageField

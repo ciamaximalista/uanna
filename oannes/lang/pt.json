@@ -161,6 +161,7 @@
     "profile.approve_followers": "Aprovar seguidores manualmente",
     "profile.change_password": "Alterar palavra-passe",
     "profile.current_password": "Palavra-passe atual",
+    "profile.email_visibility": "Só as pessoas que segues e que não estejam bloqueadas por ti nem pela instância o verão.",
     "profile.new_password": "Nova palavra-passe",
     "profile.original": "Perfil original",
     "profile.repeat_new_password": "Repetir nova palavra-passe",

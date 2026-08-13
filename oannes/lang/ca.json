@@ -161,6 +161,7 @@
     "profile.approve_followers": "Aprovar seguidors manualment",
     "profile.change_password": "Canviar contrasenya",
     "profile.current_password": "Contrasenya actual",
+    "profile.email_visibility": "Només el veuran les persones que segueixis i que no estiguin bloquejades per tu ni per la instància.",
     "profile.new_password": "Nova contrasenya",
     "profile.original": "Perfil original",
     "profile.repeat_new_password": "Repetir nova contrasenya",

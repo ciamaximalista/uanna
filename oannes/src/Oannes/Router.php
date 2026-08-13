@@ -1515,6 +1515,7 @@ final class Router
         $actorId = $_POST['actor'] ?? null;
         $actorQuery = $_POST['actor_query'] ?? null;
         $action = $_POST['action'] ?? null;
+        $returnTo = $_POST['return_to'] ?? null;
 
         if (
             !$auth->checkCsrf(is_string($csrf) ? $csrf : null)
@@ -1541,6 +1542,11 @@ final class Router
             $message = $this->applySocialAction($uid, $actorId, $action);
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
+            return;
+        }
+
+        if (is_string($returnTo) && $returnTo !== '') {
+            header('Location: ' . $this->safeReturnLocation($returnTo));
             return;
         }
 

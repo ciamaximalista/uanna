@@ -161,6 +161,7 @@
     "profile.approve_followers": "Approve followers manually",
     "profile.change_password": "Change password",
     "profile.current_password": "Current password",
+    "profile.email_visibility": "Only people you follow who are not blocked by you or by the instance will see it.",
     "profile.new_password": "New password",
     "profile.original": "Original profile",
     "profile.repeat_new_password": "Repeat new password",

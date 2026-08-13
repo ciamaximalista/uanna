@@ -259,12 +259,98 @@ final class Renderer
 
     private function reloadUrl(): string
     {
+        return $this->publicUrl(['timeline_reload' => time()]);
+    }
+
+    private function profileSocialAction(string $actorId): string
+    {
+        if ($actorId === '') {
+            return '';
+        }
+
+        $store = new FileStore($this->config['data_dir']);
+        $auth = new Auth($store);
+        $uid = $auth->currentUser();
+        if ($uid === null) {
+            return '';
+        }
+
+        if (in_array($actorId, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true)) {
+            return '';
+        }
+
+        $isFollowing = (new SocialGraph($store))->isFollowing($uid, $actorId);
+        $action = $isFollowing ? 'unfollow' : 'follow';
+        $label = $isFollowing ? $this->t('actions.unfollow', 'No seguir') : $this->t('actions.follow', 'Seguir');
+
+        return '<form method="post" action="' . Html::escape($this->publicUrl(['route' => 'admin/social'])) . '" class="profile-social-action">'
+            . '<input type="hidden" name="csrf" value="' . Html::escape($auth->csrfToken()) . '"/>'
+            . '<input type="hidden" name="actor" value="' . Html::escape($actorId) . '"/>'
+            . '<input type="hidden" name="action" value="' . Html::escape($action) . '"/>'
+            . '<input type="hidden" name="return_to" value="' . Html::escape($this->currentPage()) . '"/>'
+            . '<button type="submit">' . Html::escape($label) . '</button>'
+            . '</form>';
+    }
+
+    private function currentPage(): string
+    {
         $uri = (string)($_SERVER['REQUEST_URI'] ?? $this->publicUrl());
         if ($uri === '' || str_contains($uri, "\r") || str_contains($uri, "\n") || str_starts_with($uri, '//')) {
             return $this->publicUrl();
         }
 
-        return $uri;
+        return preg_replace('/#.*$/', '', $uri) ?? $uri;
+    }
+
+    private function profileEmailHtml(string $profileUid, string $email): string
+    {
+        $email = trim($email);
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return '';
+        }
+
+        $store = new FileStore($this->config['data_dir']);
+        $auth = new Auth($store);
+        $viewerUid = $auth->currentUser();
+        if ($viewerUid === null) {
+            return '';
+        }
+
+        $viewerActorIds = array_merge([$this->users->actorId($viewerUid)], $this->users->legacyActorIds($viewerUid));
+        if ($this->anyActorBlockedByInstance($viewerActorIds)) {
+            return '';
+        }
+
+        if ($viewerUid !== $profileUid) {
+            $graph = new SocialGraph($store);
+            $relations = new SocialRelationService($store);
+            $allowed = false;
+
+            foreach ($viewerActorIds as $actorId) {
+                if ($graph->isFollowing($profileUid, $actorId)) {
+                    $allowed = true;
+                    break;
+                }
+            }
+
+            if (!$allowed || $relations->isAnyBlocked($profileUid, $viewerActorIds)) {
+                return '';
+            }
+        }
+
+        return '<p class="profile-email"><a href="mailto:' . Html::escape($email) . '">' . Html::escape($email) . '</a></p>';
+    }
+
+    private function anyActorBlockedByInstance(array $actorIds): bool
+    {
+        $settings = new InstanceSettings(new FileStore($this->config['data_dir']), $this->config);
+        foreach ($actorIds as $actorId) {
+            if (is_string($actorId) && $actorId !== '' && $settings->isActorBlocked($actorId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function home(): string
@@ -308,17 +394,20 @@ final class Renderer
 
         $name = Html::escape((string)($user['name'] ?? $uid));
         $bio = Html::escape((string)($user['bio'] ?? ''));
+        $emailHtml = $this->profileEmailHtml($uid, (string)($user['email'] ?? ''));
         $host = Html::escape((string)$this->config['host']);
         $avatar = Html::escape($localUsers->avatarUrl($user));
         $header = Html::escape((string)($user['header'] ?? '') ?: $localUsers->defaultHeaderUrl());
         $avatarHtml = '<img class="avatar" src="' . $avatar . '" alt=""/>';
         $headerStyle = $header !== '' ? ' style="background-image:url(\'' . $header . '\')"' : '';
+        $profileActions = $this->profileSocialAction($localUsers->actorId($uid));
 
         $body = '<section class="profile hero-profile">'
             . '<div class="profile-cover"' . $headerStyle . '></div>'
             . '<div class="profile-main">' . $avatarHtml . '<div><h1>' . $name . '</h1>'
-            . '<p class="meta">@' . Html::escape($uid) . '@' . $host . '</p></div></div>'
+            . '<p class="meta">@' . Html::escape($uid) . '@' . $host . '</p></div>' . $profileActions . '</div>'
             . ($bio !== '' ? '<p class="bio">' . nl2br($bio) . '</p>' : '')
+            . $emailHtml
             . '</section><section class="timeline">' . $items . '</section>';
 
         return $this->page($name, $body);
@@ -354,12 +443,13 @@ final class Renderer
             ? '<img class="avatar" src="' . $avatar . '" alt=""/>'
             : '<span class="avatar avatar-fallback">' . Html::escape((string)$info['initial']) . '</span>';
         $externalUrl = Html::escape((string)$info['url']);
+        $profileActions = $this->profileSocialAction($actorId);
 
         $body = '<section class="profile hero-profile">'
             . '<div class="profile-cover"></div>'
             . '<div class="profile-main"><a href="' . $externalUrl . '">' . $avatarHtml . '</a><div><h1>' . $name . '</h1>'
             . ($handle !== '' ? '<p class="meta">' . $handle . '</p>' : '')
-            . '<p class="meta"><a href="' . $externalUrl . '">' . Html::escape($this->t('profile.original', 'Perfil original')) . '</a></p></div></div>'
+            . '<p class="meta"><a href="' . $externalUrl . '">' . Html::escape($this->t('profile.original', 'Perfil original')) . '</a></p></div>' . $profileActions . '</div>'
             . '</section><section class="timeline">' . $items . '</section>';
 
         return $this->page((string)$info['label'], $body);

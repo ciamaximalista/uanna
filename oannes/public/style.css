@@ -982,6 +982,21 @@ h3 {
     margin-top: -2.6rem;
 }
 
+.profile-main > div {
+    min-width: 0;
+}
+
+.profile-social-action {
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+.profile-social-action button {
+    min-height: 2.35rem;
+    padding: 0.5rem 0.85rem;
+    white-space: nowrap;
+}
+
 .avatar {
     flex: 0 0 auto;
     width: 5.2rem;
@@ -1003,6 +1018,17 @@ h3 {
 .bio {
     padding: 0 1rem 1rem;
     margin: 0;
+}
+
+.profile-email {
+    padding: 0 1rem 1rem;
+    margin: -0.35rem 0 0;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.profile-email a {
+    color: var(--accent);
 }
 
 .admin-head {
@@ -1248,6 +1274,14 @@ h3 {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0 0.85rem;
+}
+
+.field-help {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
 }
 
 .profile-language-field {
@@ -1534,9 +1568,19 @@ main > *,
 
     .profile-main {
         align-items: center;
+        flex-wrap: wrap;
         margin-top: 0;
         background: var(--panel);
         padding: 0 0.85rem 0.85rem;
+    }
+
+    .profile-social-action {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .profile-social-action button {
+        width: 100%;
     }
 
     .avatar {
