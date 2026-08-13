@@ -16,7 +16,7 @@ Uanna works with JSON and XML files. It does not use SQLite, MySQL, MariaDB, Red
 - Favorites and boosts, with avatars linked to profiles and reversible actions.
 - Reply trees based on `inReplyTo`, without confusing links with replies.
 - `@user` and `@user@server` mentions with links and notifications.
-- Image attachments with alternative text.
+- Image attachments with alternative text, shown in a separate modal to keep timelines focused on reading and people, and to reduce scroll stress.
 - Editing and deleting your own posts, sending the corresponding ActivityPub activities.
 - User panel with profile, notifications, followers, following, search, and private messages.
 - Multilingual interface based on JSON files, with an instance default language and a language chosen by each user.
@@ -143,7 +143,7 @@ Inbox and ActivityPub delivery processing are configured from the administration
 There are two modes:
 
 - `Update when activity is detected (slow)`: Uanna processes inbox and deliveries opportunistically during normal web visits. Each request may run a small inbox and delivery batch, with concurrency locking and cooldowns to avoid overloading the server. It does not require cron, but it can take longer if the instance has little web activity.
-- `Use cron`: Uanna does not process queues during visits. The administrator must schedule the queue commands in the server crontab. This is the recommended mode for instances with more federated traffic, or to keep work moving even when nobody visits the site for hours.
+- `Use cron`: Uanna does not process queues during visits. The administrator must schedule the queue commands in the crontab of the same operating user that runs PHP, normally `www-data` on Debian/Ubuntu. This is the recommended mode for instances with more federated traffic, or to keep work moving even when nobody visits the site for hours.
 
 Limits are adjusted in `oannes/config/oannes.php`:
 
@@ -168,7 +168,21 @@ It also shows the recommended `crontab` block, replacing `/path/to/uanna` with t
 * * * * * cd /path/to/uanna && php oannes/bin/oannes.php inbox-run 25 >/dev/null 2>&1
 ```
 
-The panel also includes a command to save those lines to the current user's crontab.
+Install those lines in the web/PHP user's crontab, not in root's crontab and not with `sudo` inside the cron command. On Debian/Ubuntu this is usually:
+
+```sh
+sudo crontab -u www-data -e
+```
+
+To inspect where the tasks are installed:
+
+```sh
+sudo crontab -u www-data -l
+sudo crontab -l
+crontab -l
+```
+
+If queue jobs run as `root` while the web writes as `www-data`, files in `oannes/data` may be left with incompatible ownership and later operations can fail. The cron user and the PHP user should be the same whenever possible.
 
 ## Android App
 
