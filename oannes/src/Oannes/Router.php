@@ -171,6 +171,11 @@ final class Router
             return;
         }
 
+        if ($route === 'instance-admin/social-graph') {
+            $this->instanceAdminSocialGraph($method);
+            return;
+        }
+
         if ($route === 'admin/social') {
             $this->adminSocial($method);
             return;
@@ -1512,6 +1517,421 @@ final class Router
         echo $this->adminDashboard($uid, $auth, 'Mensaje privado enviado.');
     }
 
+    private function instanceAdminSocialGraph(string $method): void
+    {
+        [, $auth] = $this->requireInstanceAdmin();
+        if ($method !== 'POST' || !$auth->checkCsrf(is_string($_POST['csrf'] ?? null) ? $_POST['csrf'] : null)) {
+            $this->instanceAdmin(null, 'Solicitud no válida.', 'social-graph');
+            return;
+        }
+
+        if (!function_exists('imagecreatetruecolor')) {
+            $this->instanceAdmin(null, 'Falta la extensión GD de PHP para generar el grafo social.', 'social-graph');
+            return;
+        }
+
+        try {
+            $dir = rtrim((string)($this->config['public_dir'] ?? dirname(__DIR__, 2) . '/public'), '/') . '/assets/instance';
+            if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+                throw new \RuntimeException('No se pudo crear el directorio de assets.');
+            }
+
+            @chmod($dir, 02775);
+            $path = $dir . '/social-graph.png';
+            $image = $this->buildSocialGraphImage();
+            if (!imagepng($image, $path)) {
+                imagedestroy($image);
+                throw new \RuntimeException('No se pudo guardar el PNG del grafo social.');
+            }
+
+            imagedestroy($image);
+            @chmod($path, 0664);
+        } catch (\Throwable $e) {
+            $this->instanceAdmin(null, $e->getMessage(), 'social-graph');
+            return;
+        }
+
+        $this->instanceAdmin('Grafo social generado.', null, 'social-graph');
+    }
+
+    private function buildSocialGraphImage(): \GdImage
+    {
+        if (!function_exists('imagecreatetruecolor')) {
+            throw new \RuntimeException('Falta la extensión GD de PHP.');
+        }
+
+        $users = $this->users->all();
+        $uids = array_values(array_filter(array_keys($users), 'is_string'));
+        sort($uids, SORT_STRING);
+
+        $graph = new SocialGraph($this->store);
+        [$nodes, $edges, $localIds] = $this->socialGraphData($uids, $users, $graph);
+        $localNodeIds = [];
+        $remoteNodeIds = [];
+        foreach ($nodes as $nodeId => $node) {
+            if ((bool)($node['local'] ?? false)) {
+                $localNodeIds[] = $nodeId;
+            } else {
+                $remoteNodeIds[] = $nodeId;
+            }
+        }
+
+        $count = max(1, count($nodes));
+        $size = max(900, min(2400, 440 + ($count * 34)));
+        $center = $size / 2;
+        $outerRadius = max(260, ($size / 2) - 132);
+        $innerRadius = max(140, $outerRadius * 0.48);
+
+        $image = imagecreatetruecolor($size, $size);
+        imagealphablending($image, true);
+        imagesavealpha($image, true);
+
+        $bg = imagecolorallocate($image, 23, 28, 31);
+        $panel = imagecolorallocate($image, 35, 42, 46);
+        $text = imagecolorallocate($image, 232, 235, 232);
+        $muted = imagecolorallocate($image, 154, 162, 160);
+        $followingColor = imagecolorallocate($image, 80, 170, 230);
+        $followerColor = imagecolorallocate($image, 232, 95, 86);
+        $otherColor = imagecolorallocate($image, 116, 124, 126);
+        $nodeBorder = imagecolorallocate($image, 210, 216, 214);
+        $remoteBorder = imagecolorallocate($image, 118, 139, 146);
+
+        imagefilledrectangle($image, 0, 0, $size, $size, $bg);
+        imagefilledellipse($image, (int)$center, (int)$center, (int)($outerRadius * 2.04), (int)($outerRadius * 2.04), $panel);
+
+        $positions = $this->socialGraphPositions($localNodeIds, $remoteNodeIds, $center, $innerRadius, $outerRadius);
+
+        foreach ($edges as $edge) {
+            $from = (string)($edge['from'] ?? '');
+            $to = (string)($edge['to'] ?? '');
+            if ($from === $to || !isset($positions[$from], $positions[$to])) {
+                continue;
+            }
+
+            $fromLocal = (bool)($nodes[$from]['local'] ?? false);
+            $toLocal = (bool)($nodes[$to]['local'] ?? false);
+            $color = $fromLocal && !$toLocal
+                ? $followingColor
+                : (!$fromLocal && $toLocal ? $followerColor : $otherColor);
+
+            $this->drawArrow($image, $positions[$from], $positions[$to], $color);
+        }
+
+        foreach ($nodes as $nodeId => $node) {
+            if (!isset($positions[$nodeId])) {
+                continue;
+            }
+
+            $isLocal = (bool)($node['local'] ?? false);
+            $border = $isLocal ? $nodeBorder : $remoteBorder;
+            $this->drawGraphNode(
+                $image,
+                (string)$nodeId,
+                (string)($node['label'] ?? $nodeId),
+                (string)($node['avatar'] ?? ''),
+                $positions[$nodeId],
+                $border,
+                $text,
+                $muted,
+                $isLocal ? 58 : 42
+            );
+        }
+
+        imagestring($image, 5, 24, 22, 'Red de ' . (new InstanceSettings($this->store, $this->config))->instanceName(), $text);
+        imagestring($image, 3, 24, 48, 'Anillo interior: usuarios locales | Anillo exterior: usuarios remotos', $muted);
+        imagestring($image, 3, 24, 66, 'Azul: local sigue remoto | Rojo: remoto sigue local | Gris: relacion local', $muted);
+        $this->drawLegendLine($image, 24, $size - 48, $followingColor, 'Local sigue remoto');
+        $this->drawLegendLine($image, 190, $size - 48, $followerColor, 'Remoto sigue local');
+        $this->drawLegendLine($image, 372, $size - 48, $otherColor, 'Relacion local');
+
+        return $image;
+    }
+
+    private function socialGraphData(array $uids, array $users, SocialGraph $graph): array
+    {
+        $nodes = [];
+        $edges = [];
+        $localIds = [];
+
+        foreach ($uids as $uid) {
+            $user = is_array($users[$uid] ?? null) ? $users[$uid] : [];
+            $nodeId = 'local:' . $uid;
+            $nodes[$nodeId] = [
+                'label' => (string)($user['name'] ?? $uid),
+                'avatar' => $this->users->avatarUrl($user),
+                'local' => true,
+            ];
+            $localIds[$this->users->actorId($uid)] = $nodeId;
+            foreach ($this->users->legacyActorIds($uid) as $legacyId) {
+                $localIds[$legacyId] = $nodeId;
+            }
+        }
+
+        foreach ($uids as $uid) {
+            $fromNode = 'local:' . $uid;
+            foreach ($graph->following($uid) as $actor) {
+                $actorId = ActivityPub::objectId($actor);
+                if ($actorId === null) {
+                    continue;
+                }
+
+                $targetNode = $this->socialGraphNodeForActor($actor, $nodes, $localIds);
+                if ($targetNode !== '') {
+                    $edges[$fromNode . '>' . $targetNode] = ['from' => $fromNode, 'to' => $targetNode];
+                }
+            }
+
+            foreach ($graph->followers($uid) as $actor) {
+                $actorId = ActivityPub::objectId($actor);
+                if ($actorId === null) {
+                    continue;
+                }
+
+                $sourceNode = $this->socialGraphNodeForActor($actor, $nodes, $localIds);
+                if ($sourceNode !== '') {
+                    $edges[$sourceNode . '>' . $fromNode] = ['from' => $sourceNode, 'to' => $fromNode];
+                }
+            }
+        }
+
+        ksort($nodes, SORT_STRING);
+        ksort($edges, SORT_STRING);
+
+        return [$nodes, array_values($edges), $localIds];
+    }
+
+    private function socialGraphNodeForActor(array $actor, array &$nodes, array $localIds): string
+    {
+        foreach (ActivityPub::aliases($actor) as $alias) {
+            if (isset($localIds[$alias])) {
+                return $localIds[$alias];
+            }
+        }
+
+        $actorId = ActivityPub::objectId($actor);
+        if ($actorId === null) {
+            return '';
+        }
+
+        $nodeId = 'remote:' . Id::digest($actorId);
+        if (!isset($nodes[$nodeId])) {
+            $nodes[$nodeId] = [
+                'label' => $this->socialGraphActorLabel($actor, $actorId),
+                'avatar' => $this->socialGraphActorAvatar($actor),
+                'local' => false,
+            ];
+        }
+
+        return $nodeId;
+    }
+
+    private function socialGraphActorLabel(array $actor, string $actorId): string
+    {
+        $name = (string)($actor['name'] ?? '');
+        $preferred = (string)($actor['preferredUsername'] ?? '');
+        $host = parse_url($actorId, PHP_URL_HOST);
+
+        if ($preferred !== '' && is_string($host) && $host !== '') {
+            return '@' . $preferred . '@' . $host;
+        }
+
+        return $name !== '' ? $name : $actorId;
+    }
+
+    private function socialGraphActorAvatar(array $actor): string
+    {
+        $icon = $actor['icon'] ?? null;
+        if (is_array($icon) && is_string($icon['url'] ?? null)) {
+            return $icon['url'];
+        }
+
+        return '';
+    }
+
+    private function socialGraphPositions(array $localNodeIds, array $remoteNodeIds, float $center, float $innerRadius, float $outerRadius): array
+    {
+        $positions = [];
+        foreach ([[$localNodeIds, $innerRadius], [$remoteNodeIds, $outerRadius]] as [$nodeIds, $radius]) {
+            $count = max(1, count($nodeIds));
+            foreach ($nodeIds as $index => $nodeId) {
+                $angle = (-M_PI / 2) + (($index / $count) * 2 * M_PI);
+                $positions[$nodeId] = [
+                    'x' => (int)round($center + cos($angle) * $radius),
+                    'y' => (int)round($center + sin($angle) * $radius),
+                ];
+            }
+        }
+
+        return $positions;
+    }
+
+    private function drawGraphNode(\GdImage $image, string $uid, string $label, string $avatarUrl, array $position, int $border, int $text, int $muted, int $size = 58): void
+    {
+        $x = (int)$position['x'];
+        $y = (int)$position['y'];
+        imagefilledellipse($image, $x, $y, $size + 8, $size + 8, $border);
+
+        $avatar = $this->loadLocalImage($avatarUrl);
+        if ($avatar instanceof \GdImage) {
+            imagecopyresampled($image, $avatar, (int)($x - ($size / 2)), (int)($y - ($size / 2)), 0, 0, $size, $size, imagesx($avatar), imagesy($avatar));
+            imagedestroy($avatar);
+        } else {
+            $fill = imagecolorallocate($image, 58, 69, 74);
+            imagefilledellipse($image, $x, $y, $size, $size, $fill);
+            imagestring($image, 5, $x - 5, $y - 7, mb_strtoupper(mb_substr($label !== '' ? $label : $uid, 0, 1)), $text);
+        }
+
+        imageellipse($image, $x, $y, $size + 8, $size + 8, $border);
+        $display = mb_substr($label !== '' ? $label : $uid, 0, 18);
+        $textWidth = imagefontwidth(2) * strlen($display);
+        imagestring($image, 2, (int)($x - ($textWidth / 2)), (int)($y + ($size / 2) + 9), $display, $muted);
+    }
+
+    private function drawArrow(\GdImage $image, array $from, array $to, int $color): void
+    {
+        $fromX = (float)$from['x'];
+        $fromY = (float)$from['y'];
+        $toX = (float)$to['x'];
+        $toY = (float)$to['y'];
+        $dx = $toX - $fromX;
+        $dy = $toY - $fromY;
+        $length = max(1.0, sqrt(($dx * $dx) + ($dy * $dy)));
+        $offset = 44;
+        $startX = $fromX + ($dx / $length) * $offset;
+        $startY = $fromY + ($dy / $length) * $offset;
+        $endX = $toX - ($dx / $length) * $offset;
+        $endY = $toY - ($dy / $length) * $offset;
+
+        imagesetthickness($image, 2);
+        imageline($image, (int)$startX, (int)$startY, (int)$endX, (int)$endY, $color);
+
+        $angle = atan2($endY - $startY, $endX - $startX);
+        $head = 10;
+        $left = $angle + (M_PI * 0.82);
+        $right = $angle - (M_PI * 0.82);
+        imageline($image, (int)$endX, (int)$endY, (int)($endX + cos($left) * $head), (int)($endY + sin($left) * $head), $color);
+        imageline($image, (int)$endX, (int)$endY, (int)($endX + cos($right) * $head), (int)($endY + sin($right) * $head), $color);
+        imagesetthickness($image, 1);
+    }
+
+    private function drawLegendLine(\GdImage $image, int $x, int $y, int $color, string $label): void
+    {
+        imageline($image, $x, $y + 7, $x + 32, $y + 7, $color);
+        imagestring($image, 3, $x + 40, $y, $label, $color);
+    }
+
+    private function loadLocalImage(string $url): ?\GdImage
+    {
+        foreach ($this->localImageCandidates($url) as $candidate) {
+            $image = $this->imageFromFile($candidate);
+            if ($image instanceof \GdImage) {
+                return $image;
+            }
+        }
+
+        return $this->remoteImage($url);
+    }
+
+    private function localImageCandidates(string $url): array
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+        if (!is_string($path) || $path === '') {
+            return [];
+        }
+
+        $basePath = parse_url((string)$this->config['base_url'], PHP_URL_PATH);
+        $basePath = is_string($basePath) ? rtrim($basePath, '/') : '';
+        if ($basePath !== '' && str_starts_with($path, $basePath . '/')) {
+            $path = substr($path, strlen($basePath));
+        }
+
+        $publicDir = rtrim((string)($this->config['public_dir'] ?? dirname(__DIR__, 2) . '/public'), '/');
+        $dataDir = rtrim((string)$this->config['data_dir'], '/');
+        $candidates = [
+            $publicDir . '/' . ltrim($path, '/'),
+            $dataDir . '/' . ltrim($path, '/'),
+        ];
+
+        if (preg_match('#^/([^/]+)/s/([^/]+)$#', $path, $match) === 1) {
+            $uid = rawurldecode($match[1]);
+            $file = rawurldecode($match[2]);
+            if (preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $uid) === 1 && basename($file) === $file) {
+                $candidates[] = $dataDir . '/media/' . $uid . '/' . $file;
+            }
+        }
+
+        return array_values(array_unique($candidates));
+    }
+
+    private function imageFromFile(string $path): ?\GdImage
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $bytes = file_get_contents($path);
+        if (!is_string($bytes) || $bytes === '') {
+            return null;
+        }
+
+        $image = @imagecreatefromstring($bytes);
+        return $image instanceof \GdImage ? $image : null;
+    }
+
+    private function remoteImage(string $url): ?\GdImage
+    {
+        $scheme = parse_url($url, PHP_URL_SCHEME);
+        if (!is_string($scheme) || !in_array(strtolower($scheme), ['http', 'https'], true)) {
+            return null;
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+        $localHost = parse_url((string)$this->config['base_url'], PHP_URL_HOST);
+        if (is_string($host) && is_string($localHost) && strcasecmp($host, $localHost) === 0) {
+            return null;
+        }
+
+        $dir = rtrim((string)$this->config['data_dir'], '/') . '/cache/social-graph-avatars';
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return null;
+        }
+
+        @chmod($dir, 02775);
+        $path = $dir . '/' . Id::digest($url) . '.img';
+        if (!is_file($path) || filemtime($path) < time() - 86400) {
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => 4,
+                    'ignore_errors' => true,
+                    'header' => "Accept: image/*\r\nUser-Agent: Uanna social graph\r\n",
+                ],
+            ]);
+            $handle = @fopen($url, 'rb', false, $context);
+            if (!is_resource($handle)) {
+                return null;
+            }
+
+            $bytes = stream_get_contents($handle, 1024 * 1024);
+            fclose($handle);
+            if (!is_string($bytes) || $bytes === '') {
+                return null;
+            }
+
+            $probe = @imagecreatefromstring($bytes);
+            if (!$probe instanceof \GdImage) {
+                return null;
+            }
+
+            imagedestroy($probe);
+
+            file_put_contents($path, $bytes);
+            @chmod($path, 0664);
+        }
+
+        return $this->imageFromFile($path);
+    }
+
     private function adminSocial(string $method): void
     {
         $auth = $this->auth ?? new Auth($this->store);
@@ -1905,6 +2325,14 @@ final class Router
                 ],
             ])
             : '';
+        $settings = new InstanceSettings($this->store, $this->config);
+        $socialGraphPath = rtrim((string)($this->config['public_dir'] ?? dirname(__DIR__, 2) . '/public'), '/') . '/assets/instance/social-graph.png';
+        $socialGraphUrl = is_file($socialGraphPath)
+            ? $this->publicAssetUrl('assets/instance/social-graph.png') . '?v=' . (string)filemtime($socialGraphPath)
+            : '';
+        $socialGraphDate = is_file($socialGraphPath)
+            ? DateFormat::human(gmdate('c', (int)filemtime($socialGraphPath)), (string)($this->config['timezone'] ?? 'Europe/Madrid'))
+            : '';
 
         return (new AdminRenderer($this->renderer, $auth))->dashboard(
             $uid,
@@ -1924,6 +2352,9 @@ final class Router
             $timelineSearchResults,
             (new AndroidAppBuilder($this->store, $this->config))->manifest(),
             (new LanguageCatalog($this->store, $this->config))->available(),
+            $settings->instanceName(),
+            $socialGraphUrl,
+            $socialGraphDate,
         );
     }
 
@@ -2138,6 +2569,18 @@ final class Router
         }
 
         return $path . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    private function publicAssetUrl(string $asset): string
+    {
+        $path = (string)($this->config['public_path'] ?? '');
+        $asset = ltrim($asset, '/');
+
+        if ($path === '') {
+            return '/' . $asset;
+        }
+
+        return rtrim(dirname($path), '/') . '/' . $asset;
     }
 
     private function privateTimeline(string $uid, int $limit = 80, int $offset = 0): array

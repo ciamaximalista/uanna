@@ -172,6 +172,11 @@ final class AdminRenderer
             . '<p class="meta">' . Html::escape($this->t('admin.socialize_help', 'El usuario indicado pasará a estar en los seguidos de todos los usuarios locales. Si es externo se enviará un Follow federado por cada cuenta local.')) . '</p>'
             . '<button type="submit">' . Html::escape($this->t('admin.socialize_user', 'Socializar usuario')) . '</button>'
             . '</form>';
+        $socialGraphHtml = '<form method="post" action="?route=instance-admin/social-graph" class="instance-form">'
+            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+            . '<p class="meta">' . Html::escape($this->t('admin.social_graph_help', 'Genera un PNG estático con el grafo social local de la instancia. Después aparecerá enlazado en el panel de todos los usuarios.')) . '</p>'
+            . '<button type="submit">' . Html::escape($this->t('admin.generate_social_graph', 'Generar grafo social')) . '</button>'
+            . '</form>';
         $appHtml = $this->appBuildBox($csrf, $appBuild);
         $editUsersHtml = '<div class="actor-list">';
 
@@ -214,6 +219,7 @@ final class AdminRenderer
             . $this->panelBox($this->t('admin.edit_users', 'Editar usuarios'), $editUsersHtml)
             . $this->panelBox($this->t('admin.import_user', 'Importar usuario'), $importUsersHtml)
             . $this->panelBox($this->t('admin.socialize_user', 'Socializar usuario'), $socializeHtml)
+            . $this->panelBox($this->t('admin.generate_social_graph', 'Generar grafo social'), $socialGraphHtml, $openBox === 'social-graph')
             . $this->panelBox($this->t('admin.compile_app', 'Compilar app'), $appHtml, $openBox === 'app'));
     }
 
@@ -234,7 +240,10 @@ final class AdminRenderer
         string $timelineSearchQuery = '',
         string $timelineSearchResults = '',
         ?array $appDownload = null,
-        array $languages = []
+        array $languages = [],
+        string $instanceName = 'Uanna',
+        string $socialGraphUrl = '',
+        string $socialGraphDate = ''
     ): string
     {
         $csrf = Html::escape($this->auth->csrfToken());
@@ -242,7 +251,7 @@ final class AdminRenderer
         $errorHtml = $error !== null ? '<p class="error">' . Html::escape($error) . '</p>' : '';
         $profileHtml = $this->profileForm($uid, $profile ?? [], $csrf, $languages);
         $notificationsHtml = $this->notifications($notifications, $pendingFollows, $pendingCreates, $csrf);
-        $socialHtml = $this->socialColumns($uid, $csrf, $followers, $following, $socialStates);
+        $socialHtml = $this->socialColumns($uid, $csrf, $followers, $following, $socialStates, $socialGraphUrl, $socialGraphDate);
         $privateHtml = $this->privateMessages($privateMessages, $csrf);
         $migrationHtml = $this->migrationTools($uid, $csrf);
         $appDownloadHtml = $this->appDownloadBox($appDownload);
@@ -547,8 +556,16 @@ final class AdminRenderer
         return ActivityPub::objectId($object) ?? '';
     }
 
-    private function socialColumns(string $uid, string $csrf, array $followers, array $following, array $socialStates): string
+    private function socialColumns(string $uid, string $csrf, array $followers, array $following, array $socialStates, string $socialGraphUrl, string $socialGraphDate): string
     {
+        $graphHtml = $socialGraphUrl !== ''
+            ? '<div class="social-graph-link">'
+                . ($socialGraphDate !== '' ? '<span class="meta">' . Html::escape($this->t('network.social_graph_generated_at', 'Generado: {date}', ['date' => $socialGraphDate])) . '</span>' : '')
+                . '<a class="button-link secondary" href="' . Html::escape($socialGraphUrl) . '" target="_blank" rel="noopener">' . Html::escape($this->t('network.open_social_graph', 'Abrir grafo social')) . '</a>'
+                . '<a class="button-link" href="' . Html::escape($socialGraphUrl) . '" download="social-graph.png">' . Html::escape($this->t('actions.download', 'Descargar')) . '</a>'
+                . '</div>'
+            : '<p class="meta social-graph-link">' . Html::escape($this->t('network.social_graph_not_generated', 'El administrador todavía no ha generado el grafo social.')) . '</p>';
+
         return '<form method="post" action="?route=admin/social" class="follow-new-form">'
             . '<input type="hidden" name="csrf" value="' . Html::escape($csrf) . '"/>'
             . '<input type="hidden" name="action" value="follow-new"/>'
@@ -558,7 +575,8 @@ final class AdminRenderer
             . '<div class="social-columns">'
             . '<section><h3>' . Html::escape($this->t('network.followers', 'Seguidores')) . ' <span class="social-count">' . count($followers) . '</span></h3>' . $this->actorList($uid, $csrf, $followers, $socialStates, false) . '</section>'
             . '<section><h3>' . Html::escape($this->t('network.following', 'Seguidos')) . ' <span class="social-count">' . count($following) . '</span></h3>' . $this->actorList($uid, $csrf, $following, $socialStates, true) . '</section>'
-            . '</div>';
+            . '</div>'
+            . $graphHtml;
     }
 
     private function actorList(string $uid, string $csrf, array $actors, array $socialStates, bool $showUnfollow): string

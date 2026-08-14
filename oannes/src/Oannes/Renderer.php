@@ -279,17 +279,124 @@ final class Renderer
             return '';
         }
 
-        $isFollowing = (new SocialGraph($store))->isFollowing($uid, $actorId);
+        $graph = new SocialGraph($store);
+        $isFollowing = $graph->isFollowing($uid, $actorId);
+        $followsYou = $graph->isFollower($uid, $actorId);
         $action = $isFollowing ? 'unfollow' : 'follow';
         $label = $isFollowing ? $this->t('actions.unfollow', 'No seguir') : $this->t('actions.follow', 'Seguir');
 
-        return '<form method="post" action="' . Html::escape($this->publicUrl(['route' => 'admin/social'])) . '" class="profile-social-action">'
+        return '<div class="profile-social-controls">'
+            . ($followsYou ? '<span class="profile-follow-badge">' . Html::escape($this->t('profile.follows_you', 'Te sigue')) . '</span>' : '')
+            . '<form method="post" action="' . Html::escape($this->publicUrl(['route' => 'admin/social'])) . '" class="profile-social-action">'
             . '<input type="hidden" name="csrf" value="' . Html::escape($auth->csrfToken()) . '"/>'
             . '<input type="hidden" name="actor" value="' . Html::escape($actorId) . '"/>'
             . '<input type="hidden" name="action" value="' . Html::escape($action) . '"/>'
             . '<input type="hidden" name="return_to" value="' . Html::escape($this->currentPage()) . '"/>'
             . '<button type="submit">' . Html::escape($label) . '</button>'
-            . '</form>';
+            . '</form>'
+            . '</div>';
+    }
+
+    private function followedByPeopleYouFollow(string $targetActorId): string
+    {
+        $targetActorId = trim($targetActorId);
+        if ($targetActorId === '') {
+            return '';
+        }
+
+        $store = new FileStore($this->config['data_dir']);
+        $auth = new Auth($store);
+        $viewerUid = $auth->currentUser();
+        if ($viewerUid === null) {
+            return '';
+        }
+
+        $viewerActorIds = array_merge([$this->users->actorId($viewerUid)], $this->users->legacyActorIds($viewerUid));
+        if (in_array($targetActorId, $viewerActorIds, true)) {
+            return '';
+        }
+
+        $graph = new SocialGraph($store);
+        $viewerFollowing = [];
+        foreach ($graph->following($viewerUid) as $actor) {
+            foreach (ActivityPub::aliases($actor) as $alias) {
+                $viewerFollowing[$alias] = $actor;
+            }
+        }
+
+        if ($viewerFollowing === []) {
+            return '';
+        }
+
+        $matches = [];
+        foreach ($this->users->all() as $uid => $_user) {
+            if (!is_string($uid) || $uid === $viewerUid) {
+                continue;
+            }
+
+            $candidateIds = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
+            $isFollowedByViewer = false;
+            foreach ($candidateIds as $candidateId) {
+                if (isset($viewerFollowing[$candidateId])) {
+                    $isFollowedByViewer = true;
+                    break;
+                }
+            }
+
+            if ($isFollowedByViewer && $graph->isFollowing($uid, $targetActorId)) {
+                $matches[$this->users->actorId($uid)] = $this->actorInfo($this->users->actorId($uid));
+            }
+        }
+
+        $localTargetUid = $this->localUidForActor($targetActorId);
+        if ($localTargetUid !== null) {
+            foreach ($graph->followers($localTargetUid) as $actor) {
+                $actorId = ActivityPub::objectId($actor);
+                if ($actorId === null) {
+                    continue;
+                }
+
+                foreach (ActivityPub::aliases($actor) as $alias) {
+                    if (isset($viewerFollowing[$alias])) {
+                        $matches[$actorId] = $this->actorInfo($actorId);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($matches === []) {
+            return '';
+        }
+
+        $html = '';
+        foreach (array_slice($matches, 0, 8, true) as $info) {
+            $url = Html::escape((string)($info['internal_url'] ?? $info['url'] ?? '#'));
+            $label = Html::escape((string)($info['label'] ?? ''));
+            $avatar = Html::escape((string)($info['avatar'] ?? ''));
+            $initial = Html::escape((string)($info['initial'] ?? '?'));
+            $avatarHtml = $avatar !== ''
+                ? '<img src="' . $avatar . '" alt=""/>'
+                : '<span class="followed-by-avatar avatar-fallback">' . $initial . '</span>';
+            $html .= '<a class="followed-by-avatar-link" href="' . $url . '" title="' . $label . '" aria-label="' . $label . '">' . $avatarHtml . '</a>';
+        }
+
+        return '<p class="profile-followed-by"><span>' . Html::escape($this->t('profile.followed_by', 'Seguido por')) . '</span>' . $html . '</p>';
+    }
+
+    private function localUidForActor(string $actorId): ?string
+    {
+        foreach ($this->users->all() as $uid => $_user) {
+            if (!is_string($uid)) {
+                continue;
+            }
+
+            if (in_array($actorId, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true)) {
+                return $uid;
+            }
+        }
+
+        return null;
     }
 
     private function currentPage(): string
@@ -398,12 +505,14 @@ final class Renderer
         $header = Html::escape((string)($user['header'] ?? '') ?: $localUsers->defaultHeaderUrl());
         $avatarHtml = '<img class="avatar" src="' . $avatar . '" alt=""/>';
         $headerStyle = $header !== '' ? ' style="background-image:url(\'' . $header . '\')"' : '';
-        $profileActions = $this->profileSocialAction($localUsers->actorId($uid));
+        $profileActorId = $localUsers->actorId($uid);
+        $profileActions = $this->profileSocialAction($profileActorId);
+        $followedByHtml = $this->followedByPeopleYouFollow($profileActorId);
 
         $body = '<section class="profile hero-profile">'
             . '<div class="profile-cover"' . $headerStyle . '></div>'
             . '<div class="profile-main">' . $avatarHtml . '<div><h1>' . $name . '</h1>'
-            . '<p class="meta">@' . Html::escape($uid) . '@' . $host . '</p></div>' . $profileActions . '</div>'
+            . '<p class="meta">@' . Html::escape($uid) . '@' . $host . '</p>' . $followedByHtml . '</div>' . $profileActions . '</div>'
             . ($bio !== '' ? '<p class="bio">' . nl2br($bio) . '</p>' : '')
             . $emailHtml
             . '</section><section class="timeline">' . $items . $this->timelineMore($nextUrl) . '</section>';
@@ -463,6 +572,7 @@ final class Renderer
             . '<div class="profile-cover"></div>'
             . '<div class="profile-main"><a href="' . $externalUrl . '">' . $avatarHtml . '</a><div><h1>' . $name . '</h1>'
             . ($handle !== '' ? '<p class="meta">' . $handle . '</p>' : '')
+            . $this->followedByPeopleYouFollow($actorId)
             . '<p class="meta"><a href="' . $externalUrl . '">' . Html::escape($this->t('profile.original', 'Perfil original')) . '</a></p></div>' . $profileActions . '</div>'
             . '</section><section class="timeline">' . $items . $this->timelineMore($nextUrl) . '</section>';
 

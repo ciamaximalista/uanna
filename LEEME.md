@@ -20,6 +20,7 @@ Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni 
 - Edicion y borrado de publicaciones propias con envio de actividades ActivityPub.
 - Panel de usuario con perfil, notificaciones, seguidores, seguidos, buscador del timeline y mensajes privados.
 - La busqueda del timeline revisa publicaciones antiguas accesibles mas alla de la vista corta del panel; `timeline_search_limit` controla esa ventana.
+- Grafo social del nodo en PNG, generado bajo demanda por el administrador y descargable desde la caja Red de cada usuario.
 - Interfaz multidioma por archivos JSON, con idioma por defecto de instancia e idioma elegido por cada usuario.
 - Exportacion de usuario desde el panel en ZIP, con `archive.xml` y adjuntos locales incluidos.
 - Notificaciones con contador de no leidas y pendientes, enlaces a perfiles originales y publicaciones afectadas.
