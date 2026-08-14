@@ -9,16 +9,17 @@ Uanna works with JSON and XML files. It does not use SQLite, MySQL, MariaDB, Red
 ## Features
 
 - Local note publishing with public, followers-only, or private visibility.
-- Personal timeline for authenticated users.
+- Personal timeline for authenticated users, with infinite scroll until all available posts are loaded.
 - Public home page with an editable instance presentation.
 - Public profiles at routes such as `/@user`.
 - Internal profiles for cached federated actors, while keeping a link to the original profile.
 - Favorites and boosts, with avatars linked to profiles and reversible actions.
 - Reply trees based on `inReplyTo`, without confusing links with replies.
 - `@user` and `@user@server` mentions with links and notifications.
-- Multiple image attachments with alternative text, shown in separate modals to keep timelines focused on reading and people, and to reduce scroll stress.
+- Up to four image attachments per post by default, each with alternative text and shown in separate modals to keep timelines focused on reading and people, and to reduce scroll stress.
 - Editing and deleting your own posts, sending the corresponding ActivityPub activities.
-- User panel with profile, notifications, followers, following, search, and private messages.
+- User panel with profile, notifications, followers, following, timeline search, and private messages.
+- Timeline search scans older accessible posts beyond the short panel view; `timeline_search_limit` controls the search window.
 - Multilingual interface based on JSON files, with an instance default language and a language chosen by each user.
 - User export from the panel as a ZIP file, including `archive.xml` and local attachments.
 - Notifications with unread and pending counters, links to original profiles, and affected posts.

@@ -67,6 +67,11 @@ final class ObjectRepository
         return $objects;
     }
 
+    public function all(): array
+    {
+        return $this->recent(PHP_INT_MAX);
+    }
+
     public function byActor(string $actorId, int $limit = 50): array
     {
         return $this->byAnyActor([$actorId], $limit);

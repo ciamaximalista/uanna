@@ -9,16 +9,17 @@ Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni 
 ## Caracteristicas
 
 - Publicacion de notas locales con visibilidad publica, seguidores o privada.
-- Timeline personal para usuarios autenticados.
+- Timeline personal para usuarios autenticados, con scroll infinito hasta cargar todas las publicaciones disponibles.
 - Portada publica con presentacion editable de la instancia.
 - Perfiles publicos en rutas tipo `/@usuario`.
 - Perfiles internos para actores federados cacheados, manteniendo enlace al perfil original.
 - Favoritos e impulsos, con avatares enlazados a los perfiles y acciones reversibles.
 - Arboles de respuestas basados en `inReplyTo`, sin confundir enlaces con respuestas.
 - Menciones `@usuario` y `@usuario@servidor` con enlaces y avisos.
-- Varios adjuntos de imagen con texto alternativo, visibles en modales separados para centrar el timeline en la lectura y las personas, y reducir el estres del scroll.
+- Hasta cuatro adjuntos de imagen por publicacion por defecto, cada uno con texto alternativo y visible en modal separado para centrar el timeline en la lectura y las personas, y reducir el estres del scroll.
 - Edicion y borrado de publicaciones propias con envio de actividades ActivityPub.
-- Panel de usuario con perfil, notificaciones, seguidores, seguidos, busqueda y mensajes privados.
+- Panel de usuario con perfil, notificaciones, seguidores, seguidos, buscador del timeline y mensajes privados.
+- La busqueda del timeline revisa publicaciones antiguas accesibles mas alla de la vista corta del panel; `timeline_search_limit` controla esa ventana.
 - Interfaz multidioma por archivos JSON, con idioma por defecto de instancia e idioma elegido por cada usuario.
 - Exportacion de usuario desde el panel en ZIP, con `archive.xml` y adjuntos locales incluidos.
 - Notificaciones con contador de no leidas y pendientes, enlaces a perfiles originales y publicaciones afectadas.

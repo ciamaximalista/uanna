@@ -359,7 +359,7 @@ final class Renderer
         return $this->page('', '<section class="timeline">' . $this->instancePresentationCard($settings) . '</section>');
     }
 
-    public function privateTimelinePage(string $uid, array $objects, string $csrf): string
+    public function privateTimelinePage(string $uid, array $objects, string $csrf, string $nextUrl = ''): string
     {
         $items = $objects !== []
             ? $this->objectList($objects, false, [
@@ -370,7 +370,7 @@ final class Renderer
             ])
             : '<p class="muted">' . Html::escape($this->t('timeline.empty_following', 'Todavía no hay publicaciones importadas de las cuentas que sigues.')) . '</p>';
 
-        return $this->page('', '<section class="timeline">' . $items . '</section>');
+        return $this->page('', '<section class="timeline">' . $items . $this->timelineMore($nextUrl) . '</section>');
     }
 
     public function userPage(string $uid, ?array $actions = null): string
@@ -383,14 +383,12 @@ final class Renderer
             return $this->page($this->t('page.not_found', 'No encontrado'), '<h1>' . Html::escape($this->t('page.not_found', 'No encontrado')) . '</h1>');
         }
 
-        $items = '';
-        $objects = array_merge(
-            $this->repo->byAnyActor(array_merge([$localUsers->actorId($uid)], $localUsers->legacyActorIds($uid)), 240),
-            $this->interactions->boostedObjectsByUser($uid, 80),
-        );
-        $objects = $this->sortObjectsForProfile($this->publicObjects($objects));
-
+        $pageSize = $this->timelinePageSize();
+        $objects = $this->userTimelineObjects($uid, 0, $pageSize + 1);
+        $hasMore = count($objects) > $pageSize;
+        $objects = array_slice($objects, 0, $pageSize);
         $items = $this->profileTimeline($objects, $actions);
+        $nextUrl = $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'user', 'user' => $uid, 'offset' => $pageSize]) : '';
 
         $name = Html::escape((string)($user['name'] ?? $uid));
         $bio = Html::escape((string)($user['bio'] ?? ''));
@@ -408,9 +406,21 @@ final class Renderer
             . '<p class="meta">@' . Html::escape($uid) . '@' . $host . '</p></div>' . $profileActions . '</div>'
             . ($bio !== '' ? '<p class="bio">' . nl2br($bio) . '</p>' : '')
             . $emailHtml
-            . '</section><section class="timeline">' . $items . '</section>';
+            . '</section><section class="timeline">' . $items . $this->timelineMore($nextUrl) . '</section>';
 
         return $this->page($name, $body);
+    }
+
+    public function userTimelineChunk(string $uid, ?array $actions, int $offset, int $limit): array
+    {
+        $objects = $this->userTimelineObjects($uid, $offset, $limit + 1);
+        $hasMore = count($objects) > $limit;
+        $objects = array_slice($objects, 0, $limit);
+
+        return [
+            'html' => $objects !== [] ? $this->profileTimeline($objects, $actions) : '',
+            'next' => $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'user', 'user' => $uid, 'offset' => $offset + $limit]) : '',
+        ];
     }
 
     public function actorPage(string $actorId, ?array $actions = null): string
@@ -434,8 +444,12 @@ final class Renderer
         }
 
         $info = $this->actorInfo($actorId);
-        $objects = $this->sortObjectsForProfile($this->publicObjects($this->repo->byAnyActor(ActivityPub::aliases($actor), 240)));
+        $pageSize = $this->timelinePageSize();
+        $objects = $this->actorTimelineObjects($actorId, 0, $pageSize + 1);
+        $hasMore = count($objects) > $pageSize;
+        $objects = array_slice($objects, 0, $pageSize);
         $items = $this->profileTimeline($objects, $actions);
+        $nextUrl = $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'actor', 'actor' => $actorId, 'offset' => $pageSize]) : '';
         $name = Html::escape((string)$info['label']);
         $handle = Html::escape($this->actorHandle($actor, $actorId));
         $avatar = Html::escape((string)$info['avatar']);
@@ -450,12 +464,66 @@ final class Renderer
             . '<div class="profile-main"><a href="' . $externalUrl . '">' . $avatarHtml . '</a><div><h1>' . $name . '</h1>'
             . ($handle !== '' ? '<p class="meta">' . $handle . '</p>' : '')
             . '<p class="meta"><a href="' . $externalUrl . '">' . Html::escape($this->t('profile.original', 'Perfil original')) . '</a></p></div>' . $profileActions . '</div>'
-            . '</section><section class="timeline">' . $items . '</section>';
+            . '</section><section class="timeline">' . $items . $this->timelineMore($nextUrl) . '</section>';
 
         return $this->page((string)$info['label'], $body);
     }
 
-    private function sortObjectsForProfile(array $objects): array
+    public function actorTimelineChunk(string $actorId, ?array $actions, int $offset, int $limit): array
+    {
+        $objects = $this->actorTimelineObjects($actorId, $offset, $limit + 1);
+        $hasMore = count($objects) > $limit;
+        $objects = array_slice($objects, 0, $limit);
+
+        return [
+            'html' => $objects !== [] ? $this->profileTimeline($objects, $actions) : '',
+            'next' => $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'actor', 'actor' => $actorId, 'offset' => $offset + $limit]) : '',
+        ];
+    }
+
+    public function tagPage(string $tag, array $objects, ?array $actions, string $nextUrl = ''): string
+    {
+        $label = '#' . $tag;
+        $items = $objects !== []
+            ? $this->objectList($objects, false, ['actions' => $actions])
+            : '<p class="muted">' . Html::escape($this->t('timeline.empty_tag', 'Todavía no hay publicaciones con esta etiqueta.')) . '</p>';
+
+        return $this->page($label, '<section class="timeline tag-timeline"><h1>' . Html::escape($label) . '</h1>' . $items . $this->timelineMore($nextUrl) . '</section>');
+    }
+
+    public function timelineChunk(array $objects, ?array $actions): string
+    {
+        return $objects !== [] ? $this->objectList($objects, false, ['actions' => $actions]) : '';
+    }
+
+    private function userTimelineObjects(string $uid, int $offset, int $limit): array
+    {
+        $localUsers = new LocalUsers(new FileStore($this->config['data_dir']), $this->config);
+        $fetchLimit = max($limit, $offset + $limit);
+        $objects = array_merge(
+            $this->repo->byAnyActor(array_merge([$localUsers->actorId($uid)], $localUsers->legacyActorIds($uid)), $fetchLimit),
+            $this->interactions->boostedObjectsByUser($uid, $fetchLimit),
+        );
+
+        return $this->sortObjectsForProfile($this->publicObjects($objects), $offset, $limit);
+    }
+
+    private function actorTimelineObjects(string $actorId, int $offset, int $limit): array
+    {
+        $actor = $this->actors->findById($actorId);
+        if ($actor === null) {
+            return [];
+        }
+
+        $fetchLimit = max($limit, $offset + $limit);
+        return $this->sortObjectsForProfile(
+            $this->publicObjects($this->repo->byAnyActor(ActivityPub::aliases($actor), $fetchLimit)),
+            $offset,
+            $limit
+        );
+    }
+
+    private function sortObjectsForProfile(array $objects, int $offset = 0, int $limit = 80): array
     {
         $unique = [];
 
@@ -476,7 +544,7 @@ final class Renderer
             (string)($a['_oannes_boosted_at'] ?? ActivityPub::published($a))
         ));
 
-        return array_slice($objects, 0, 80);
+        return array_slice($objects, $offset, $limit);
     }
 
     private function profileTimeline(array $objects, ?array $actions): string
@@ -515,6 +583,22 @@ final class Renderer
         }
 
         return $html !== '' ? $html : '<p class="muted">' . Html::escape($this->t('timeline.empty_public', 'Todavía no hay publicaciones públicas.')) . '</p>';
+    }
+
+    private function timelinePageSize(): int
+    {
+        return max(20, min(200, (int)($this->config['timeline_page_size'] ?? 80)));
+    }
+
+    private function timelineMore(string $nextUrl): string
+    {
+        if ($nextUrl === '') {
+            return '';
+        }
+
+        return '<div class="timeline-more" data-next-url="' . Html::escape($nextUrl) . '">'
+            . '<button type="button">' . Html::escape($this->t('timeline.load_more', 'Cargar más')) . '</button>'
+            . '</div>';
     }
 
     private function profileThreadObjects(array $object): array
@@ -1380,7 +1464,7 @@ final class Renderer
 
     private function linkTextEntities(string $text): string
     {
-        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_-]{0,63})(?![\w@.-])|https?:\/\/[^\s<>"\']+/u';
+        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_-]{0,63})(?![\w@.-])|https?:\/\/[^\s<>"\']+|(?<![\p{L}\p{N}_&])#([\p{L}\p{N}_][\p{L}\p{N}_-]{0,63})(?![\p{L}\p{N}_-])/u';
         $html = '';
         $offset = 0;
 
@@ -1392,6 +1476,12 @@ final class Renderer
             if (str_starts_with($entity, 'http://') || str_starts_with($entity, 'https://')) {
                 [$url, $suffix] = $this->splitUrlSuffix($entity);
                 $html .= '<a href="' . Html::escape($url) . '">' . Html::escape($url) . '</a>' . Html::escape($suffix);
+                $offset = $position + strlen($entity);
+                continue;
+            }
+
+            if (str_starts_with($entity, '#')) {
+                $html .= $this->hashtagLink($entity);
                 $offset = $position + strlen($entity);
                 continue;
             }
@@ -1454,8 +1544,12 @@ final class Renderer
     private function linkUrlsInTextNode(string $text): string
     {
         return preg_replace_callback(
-            '/https?:\/\/[^\s<>"\']+/u',
+            '/https?:\/\/[^\s<>"\']+|(?<![\p{L}\p{N}_&])#([\p{L}\p{N}_][\p{L}\p{N}_-]{0,63})(?![\p{L}\p{N}_-])/u',
             function (array $match): string {
+                if (str_starts_with($match[0], '#')) {
+                    return $this->hashtagLink($match[0]);
+                }
+
                 [$url, $suffix] = $this->splitUrlSuffix($match[0]);
                 $href = html_entity_decode($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
@@ -1463,6 +1557,12 @@ final class Renderer
             },
             $text
         ) ?? $text;
+    }
+
+    private function hashtagLink(string $tag): string
+    {
+        $name = ltrim($tag, '#');
+        return '<a class="hashtag" href="' . Html::escape($this->publicUrl(['tag' => $name])) . '">' . Html::escape('#' . $name) . '</a>';
     }
 
     private function mentionUrl(string $username, string $host): ?string
@@ -1493,11 +1593,15 @@ final class Renderer
     private function assetUrl(string $asset): string
     {
         $path = (string)($this->config['public_path'] ?? '');
+        $assetPath = ltrim($asset, '/');
+        $publicDir = rtrim((string)($this->config['public_dir'] ?? dirname(__DIR__, 2) . '/public'), '/');
+        $file = $publicDir . '/' . $assetPath;
+        $version = is_file($file) ? '?v=' . (string)filemtime($file) : '';
 
         if ($path === '') {
-            return '/' . ltrim($asset, '/');
+            return '/' . $assetPath . $version;
         }
 
-        return rtrim(dirname($path), '/') . '/' . ltrim($asset, '/');
+        return rtrim(dirname($path), '/') . '/' . $assetPath . $version;
     }
 }

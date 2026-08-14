@@ -1518,6 +1518,24 @@ button[value="reject"]:focus-visible {
     max-width: 100%;
 }
 
+.timeline-more {
+    display: flex;
+    justify-content: center;
+    padding: 0.4rem 0 1rem;
+}
+
+.timeline-more button {
+    min-width: 10rem;
+}
+
+.timeline-more.is-loading button::after {
+    content: "...";
+}
+
+.timeline-more.has-error button {
+    border-color: rgba(190, 80, 80, 0.7);
+}
+
 main > *,
 .timeline > * {
     min-width: 0;

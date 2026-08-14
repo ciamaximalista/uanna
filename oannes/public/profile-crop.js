@@ -60,8 +60,105 @@
         panY.addEventListener('input', draw);
     }
 
+    function initInfiniteTimeline(root) {
+        if (root.dataset.timelineInitialized === '1') {
+            return;
+        }
+
+        root.dataset.timelineInitialized = '1';
+        const button = root.querySelector('button');
+        let loading = false;
+
+        function loadMore() {
+            const url = root.dataset.nextUrl || '';
+            if (loading || url === '') {
+                return;
+            }
+
+            loading = true;
+            root.classList.add('is-loading');
+            if (button) {
+                button.disabled = true;
+                button.setAttribute('aria-busy', 'true');
+            }
+
+            fetch(url, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'fetch',
+                },
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('timeline');
+                    }
+
+                    return response.json();
+                })
+                .then(function (payload) {
+                    const template = document.createElement('template');
+                    template.innerHTML = payload.html || '';
+                    root.before(template.content);
+
+                    if (payload.next) {
+                        root.dataset.nextUrl = payload.next;
+                        loading = false;
+                        root.classList.remove('is-loading');
+                        if (button) {
+                            button.disabled = false;
+                            button.removeAttribute('aria-busy');
+                        }
+                    } else {
+                        root.remove();
+                    }
+                })
+                .catch(function () {
+                    loading = false;
+                    root.classList.remove('is-loading');
+                    root.classList.add('has-error');
+                    if (button) {
+                        button.disabled = false;
+                        button.removeAttribute('aria-busy');
+                    }
+                });
+        }
+
+        if (button) {
+            button.addEventListener('click', loadMore);
+        }
+
+        root.oannesLoadMore = loadMore;
+
+        if ('IntersectionObserver' in window) {
+            const observer = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) {
+                        loadMore();
+                    }
+                });
+            }, { rootMargin: '600px 0px' });
+            observer.observe(root);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.image-cropper').forEach(initCropper);
+        document.querySelectorAll('.timeline-more').forEach(initInfiniteTimeline);
+        document.addEventListener('click', function (event) {
+            const button = event.target.closest('.timeline-more button');
+            if (!button) {
+                return;
+            }
+
+            event.preventDefault();
+            const root = button.closest('.timeline-more');
+            if (root) {
+                initInfiniteTimeline(root);
+                if (typeof root.oannesLoadMore === 'function') {
+                    root.oannesLoadMore();
+                }
+            }
+        });
         document.querySelectorAll('form[enctype="multipart/form-data"]').forEach(function (form) {
             form.addEventListener('submit', function (event) {
                 if (form.dataset.submitting === '1') {

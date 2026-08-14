@@ -116,6 +116,11 @@ final class Router
             return;
         }
 
+        if ($route === 'timeline-more') {
+            $this->timelineMore($method);
+            return;
+        }
+
         if ($route === 'admin/logout') {
             $this->adminLogout($method);
             return;
@@ -306,6 +311,7 @@ final class Router
         $id = $_GET['id'] ?? null;
         $uid = $_GET['user'] ?? null;
         $actor = $_GET['actor'] ?? null;
+        $tag = $_GET['tag'] ?? null;
 
         if (is_string($id) && $id !== '') {
             $format = $_GET['format'] ?? '';
@@ -336,6 +342,11 @@ final class Router
             return;
         }
 
+        if (is_string($tag) && trim($tag) !== '') {
+            $this->tagPage($tag);
+            return;
+        }
+
         if (is_string($uid) && $uid !== '') {
             echo $this->renderer->userPage($uid, $this->currentActions());
             return;
@@ -350,7 +361,12 @@ final class Router
         $currentUid = $auth->currentUser();
 
         if ($currentUid !== null) {
-            echo $this->renderer->privateTimelinePage($currentUid, $this->privateTimeline($currentUid), $auth->csrfToken());
+            $pageSize = $this->timelinePageSize();
+            $objects = $this->privateTimeline($currentUid, $pageSize + 1);
+            $hasMore = count($objects) > $pageSize;
+            $objects = array_slice($objects, 0, $pageSize);
+            $nextUrl = $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'private', 'offset' => $pageSize]) : '';
+            echo $this->renderer->privateTimelinePage($currentUid, $objects, $auth->csrfToken(), $nextUrl);
             return;
         }
 
@@ -1880,8 +1896,9 @@ final class Router
         $timelineSearchQuery = $_GET['timeline_q'] ?? '';
         $timelineSearchQuery = is_string($timelineSearchQuery) ? trim($timelineSearchQuery) : '';
         $timeline = $this->privateTimeline($uid);
+        $timelineSearchScope = $timelineSearchQuery !== '' ? $this->privateTimeline($uid, $this->timelineSearchLimit()) : [];
         $timelineSearchResults = $timelineSearchQuery !== ''
-            ? $this->renderer->objectList($this->searchTimeline($timeline, $timelineSearchQuery), false, [
+            ? $this->renderer->objectList($this->searchTimeline($timelineSearchScope, $timelineSearchQuery), false, [
                 'actions' => [
                     'uid' => $uid,
                     'csrf' => $auth->csrfToken(),
@@ -1952,7 +1969,178 @@ final class Router
         return trim(preg_replace('/\s+/u', ' ', strip_tags(implode(' ', $parts))) ?? '');
     }
 
-    private function privateTimeline(string $uid): array
+    private function timelineSearchLimit(): int
+    {
+        return max(80, min(20000, (int)($this->config['timeline_search_limit'] ?? 5000)));
+    }
+
+    private function timelineMore(string $method): void
+    {
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $scope = $_GET['scope'] ?? '';
+        $offset = max(0, (int)($_GET['offset'] ?? 0));
+        $limit = $this->timelinePageSize();
+        $actions = $this->currentActions();
+
+        if ($scope === 'private') {
+            $auth = $this->auth ?? new Auth($this->store);
+            $uid = $auth->currentUser();
+            if ($uid === null) {
+                Http::json(['error' => 'unauthorized'], 'application/json', 401);
+                return;
+            }
+
+            $objects = $this->privateTimeline($uid, $limit + 1, $offset);
+            $hasMore = count($objects) > $limit;
+            $objects = array_slice($objects, 0, $limit);
+            Http::json([
+                'html' => $this->renderer->timelineChunk($objects, [
+                    'uid' => $uid,
+                    'csrf' => $auth->csrfToken(),
+                ]),
+                'next' => $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'private', 'offset' => $offset + $limit]) : '',
+            ]);
+            return;
+        }
+
+        if ($scope === 'user') {
+            $uid = $_GET['user'] ?? '';
+            if (!is_string($uid) || $uid === '' || $this->users->find($uid) === null) {
+                Http::notFound();
+                return;
+            }
+
+            Http::json($this->renderer->userTimelineChunk($uid, $actions, $offset, $limit));
+            return;
+        }
+
+        if ($scope === 'actor') {
+            $actor = $_GET['actor'] ?? '';
+            if (!is_string($actor) || $actor === '') {
+                Http::notFound();
+                return;
+            }
+
+            Http::json($this->renderer->actorTimelineChunk($actor, $actions, $offset, $limit));
+            return;
+        }
+
+        if ($scope === 'tag') {
+            $tag = $_GET['tag'] ?? '';
+            if (!is_string($tag) || trim($tag) === '') {
+                Http::notFound();
+                return;
+            }
+
+            $tag = $this->normalizeTag($tag);
+            $objects = $this->tagObjects($tag, $offset, $limit + 1);
+            $hasMore = count($objects) > $limit;
+            $objects = array_slice($objects, 0, $limit);
+            Http::json([
+                'html' => $this->renderer->timelineChunk($objects, $actions),
+                'next' => $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'tag', 'tag' => $tag, 'offset' => $offset + $limit]) : '',
+            ]);
+            return;
+        }
+
+        Http::notFound();
+    }
+
+    private function tagPage(string $tag): void
+    {
+        $tag = $this->normalizeTag($tag);
+        if ($tag === '') {
+            Http::notFound();
+            return;
+        }
+
+        $limit = $this->timelinePageSize();
+        $objects = $this->tagObjects($tag, 0, $limit + 1);
+        $hasMore = count($objects) > $limit;
+        $objects = array_slice($objects, 0, $limit);
+        $nextUrl = $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'tag', 'tag' => $tag, 'offset' => $limit]) : '';
+
+        echo $this->renderer->tagPage($tag, $objects, $this->currentActions(), $nextUrl);
+    }
+
+    private function tagObjects(string $tag, int $offset, int $limit): array
+    {
+        $objects = [];
+        foreach ($this->repo->all() as $object) {
+            if (!is_array($object) || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
+                continue;
+            }
+
+            if ($this->objectHasTag($object, $tag)) {
+                $objects[] = $object;
+            }
+        }
+
+        usort($objects, static fn (array $a, array $b): int => strcmp(
+            (string)ActivityPub::published($b),
+            (string)ActivityPub::published($a)
+        ));
+
+        return array_slice($objects, $offset, $limit);
+    }
+
+    private function objectHasTag(array $object, string $tag): bool
+    {
+        foreach ((array)($object['tag'] ?? []) as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $name = $entry['name'] ?? '';
+            if (is_string($name) && $this->normalizeTag($name) === $tag) {
+                return true;
+            }
+        }
+
+        foreach (['sourceContent', 'content', 'summary', 'name'] as $field) {
+            $value = $object[$field] ?? null;
+            if (!is_string($value) || $value === '') {
+                continue;
+            }
+
+            preg_match_all('/(?<![\p{L}\p{N}_&])#([\p{L}\p{N}_][\p{L}\p{N}_-]{0,63})(?![\p{L}\p{N}_-])/u', strip_tags($value), $matches);
+            foreach ($matches[1] ?? [] as $candidate) {
+                if ($this->normalizeTag((string)$candidate) === $tag) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function normalizeTag(string $tag): string
+    {
+        return mb_strtolower(trim(ltrim($tag, "# \t\n\r\0\x0B")));
+    }
+
+    private function timelinePageSize(): int
+    {
+        return max(20, min(200, (int)($this->config['timeline_page_size'] ?? 80)));
+    }
+
+    private function publicUrl(array $query = []): string
+    {
+        $path = (string)($this->config['public_path'] ?? '');
+        $path = $path === '' ? '/' : $path;
+
+        if ($query === []) {
+            return $path;
+        }
+
+        return $path . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    private function privateTimeline(string $uid, int $limit = 80, int $offset = 0): array
     {
         $this->refreshTimelineInbox();
 
@@ -1987,9 +2175,10 @@ final class Router
             new ActorRepository($this->store),
             $this->config,
         );
+        $fetchLimit = max($limit, $offset + $limit);
         $objects = array_merge(
-            $this->repo->byAnyActor(array_values(array_unique($actorIds)), 80),
-            $interactions->remoteBoostedObjectsForUser($uid, $followedActorIds, 80)
+            $this->repo->byAnyActor(array_values(array_unique($actorIds)), $fetchLimit),
+            $interactions->remoteBoostedObjectsForUser($uid, $followedActorIds, $fetchLimit)
         );
         $objects = array_values(array_filter(
             $objects,
@@ -2001,7 +2190,7 @@ final class Router
             (string)($a['_oannes_boosted_at'] ?? ActivityPub::published($a))
         ));
 
-        return array_slice($objects, 0, 80);
+        return array_slice($objects, $offset, $limit);
     }
 
     private function refreshTimelineInbox(): void

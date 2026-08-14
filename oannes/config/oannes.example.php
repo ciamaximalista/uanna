@@ -16,6 +16,8 @@ return [
     'inbox_max_bytes' => 262144,
     'inbox_max_clock_skew_seconds' => 43200,
     'timeline_refresh_inbox_limit' => 10,
+    'timeline_page_size' => 80,
+    'timeline_search_limit' => 5000,
     'opportunistic_workers_enabled' => true,
     'opportunistic_workers_cooldown_seconds' => 15,
     'opportunistic_inbox_limit' => 5,
