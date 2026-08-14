@@ -1040,10 +1040,10 @@ final class Router
         }
 
         try {
-            $attachment = (new MediaUploadService($this->config))->saveImageFromPost(
+            $attachments = (new MediaUploadService($this->config))->saveImagesFromPost(
                 $uid,
                 'image_upload',
-                is_string($imageAlt) ? $imageAlt : ''
+                $this->attachmentAlts(is_string($imageAlt) ? $imageAlt : '')
             );
             $note = (new PostService(
                 $this->store,
@@ -1054,7 +1054,7 @@ final class Router
             ))->createNote($uid, $content, [
                 'visibility' => is_string($visibility) ? $visibility : 'public',
                 'inReplyTo' => is_string($inReplyTo) ? $inReplyTo : null,
-                'attachments' => $attachment !== null ? [$attachment] : [],
+                'attachments' => $attachments,
             ]);
             $this->rememberRecentPost(
                 $uid,
@@ -1104,10 +1104,10 @@ final class Router
         }
 
         try {
-            $attachment = (new MediaUploadService($this->config))->saveImageFromPost(
+            $attachments = (new MediaUploadService($this->config))->saveImagesFromPost(
                 $uid,
                 'image_upload',
-                is_string($imageAlt) ? $imageAlt : ''
+                $this->attachmentAlts(is_string($imageAlt) ? $imageAlt : '')
             );
             $note = (new PostService(
                 $this->store,
@@ -1116,7 +1116,7 @@ final class Router
                 new SocialGraph($this->store),
                 $this->config,
             ))->updateNote($uid, $id, $content, [
-                'attachments' => $attachment !== null ? [$attachment] : [],
+                'attachments' => $attachments,
             ]);
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
@@ -2295,21 +2295,54 @@ final class Router
     private function uploadedFileSignature(string $field): string
     {
         $file = $_FILES[$field] ?? null;
-        if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        if (!is_array($file)) {
             return '';
         }
 
-        $tmp = $file['tmp_name'] ?? null;
-        if (!is_string($tmp) || $tmp === '' || !is_uploaded_file($tmp)) {
-            return '';
+        $files = [];
+        if (is_array($file['error'] ?? null)) {
+            $count = count($file['error']);
+            for ($i = 0; $i < $count; $i++) {
+                if ((int)($file['error'][$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                    continue;
+                }
+
+                $files[] = [
+                    'name' => is_string($file['name'][$i] ?? null) ? $file['name'][$i] : '',
+                    'size' => (int)($file['size'][$i] ?? 0),
+                    'tmp' => is_string($file['tmp_name'][$i] ?? null) ? $file['tmp_name'][$i] : '',
+                ];
+            }
+        } elseif ((int)($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+            $files[] = [
+                'name' => is_string($file['name'] ?? null) ? $file['name'] : '',
+                'size' => (int)($file['size'] ?? 0),
+                'tmp' => is_string($file['tmp_name'] ?? null) ? $file['tmp_name'] : '',
+            ];
         }
 
-        $hash = hash_file('sha256', $tmp);
-        return Json::encode([
-            'name' => is_string($file['name'] ?? null) ? $file['name'] : '',
-            'size' => (int)($file['size'] ?? 0),
-            'hash' => is_string($hash) ? $hash : '',
-        ]);
+        $signatures = [];
+        foreach ($files as $item) {
+            $tmp = $item['tmp'];
+            if ($tmp === '' || !is_uploaded_file($tmp)) {
+                continue;
+            }
+
+            $hash = hash_file('sha256', $tmp);
+            $signatures[] = [
+                'name' => $item['name'],
+                'size' => $item['size'],
+                'hash' => is_string($hash) ? $hash : '',
+            ];
+        }
+
+        return Json::encode($signatures);
+    }
+
+    private function attachmentAlts(string $text): array
+    {
+        $lines = preg_split('/\R/u', $text) ?: [];
+        return array_map(static fn (string $line): string => trim($line), $lines);
     }
 
     private function privateMessageFromObject(array $object): ?array

@@ -23,6 +23,7 @@ return [
     'default_locale' => 'es',
     'timezone' => 'Europe/Madrid',
     'max_attachment_bytes' => 25 * 1024 * 1024,
+    'max_attachment_count' => 4,
     'default_avatar_path' => '/uanna.png',
     'public_path' => '',
     'local_actor_path' => '/u',

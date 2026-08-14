@@ -94,6 +94,8 @@
     "field.email": "Email",
     "field.header": "Cabeçalho",
     "field.image": "Imagem",
+    "field.images": "Imagens",
+    "field.alt_texts": "Textos alt, um por linha",
     "field.interface_language": "Idioma da interface",
     "field.language": "Idioma",
     "field.name": "Nome",

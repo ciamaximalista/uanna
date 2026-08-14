@@ -94,6 +94,8 @@
     "field.email": "Emaila",
     "field.header": "Goiburukoa",
     "field.image": "Irudia",
+    "field.images": "Irudiak",
+    "field.alt_texts": "Alt testuak, bat lerro bakoitzeko",
     "field.interface_language": "Interfazearen hizkuntza",
     "field.language": "Hizkuntza",
     "field.name": "Izena",

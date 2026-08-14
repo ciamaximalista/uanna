@@ -16,7 +16,7 @@ Uanna funciona con archivos JSON y XML. No usa SQLite, MySQL, MariaDB, Redis ni 
 - Favoritos e impulsos, con avatares enlazados a los perfiles y acciones reversibles.
 - Arboles de respuestas basados en `inReplyTo`, sin confundir enlaces con respuestas.
 - Menciones `@usuario` y `@usuario@servidor` con enlaces y avisos.
-- Adjuntos de imagen con texto alternativo, visibles en un modal aparte para centrar el timeline en la lectura y las personas, y reducir el estres del scroll.
+- Varios adjuntos de imagen con texto alternativo, visibles en modales separados para centrar el timeline en la lectura y las personas, y reducir el estres del scroll.
 - Edicion y borrado de publicaciones propias con envio de actividades ActivityPub.
 - Panel de usuario con perfil, notificaciones, seguidores, seguidos, busqueda y mensajes privados.
 - Interfaz multidioma por archivos JSON, con idioma por defecto de instancia e idioma elegido por cada usuario.
@@ -240,6 +240,8 @@ media/
 ```
 
 `archive.xml` incluye el perfil y todos los posts locales del usuario. Si esos posts tienen imagenes o documentos adjuntos almacenados en la instancia, Uanna los copia dentro de `media/` y reescribe sus URLs como rutas relativas.
+
+Las publicaciones pueden incluir varias imagenes adjuntas. El limite por defecto es de cuatro imagenes por publicacion y puede cambiarse con `max_attachment_count` en `oannes/config/oannes.php`; `max_attachment_bytes` se aplica a cada imagen.
 
 Desde `Panel > Exportar / Migrar` el usuario tambien puede borrar todo su contenido o dar de baja su cuenta, escribiendo su nombre de usuario como confirmacion.
 

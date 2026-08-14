@@ -10,12 +10,38 @@ final class MediaUploadService
 
     public function saveImageFromPost(string $uid, string $field, string $alt): ?array
     {
+        $attachments = $this->saveImagesFromPost($uid, $field, [$alt]);
+        return $attachments[0] ?? null;
+    }
+
+    public function saveImagesFromPost(string $uid, string $field, array $alts = []): array
+    {
         $upload = $_FILES[$field] ?? null;
 
-        if (!is_array($upload) || (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
-            return null;
+        if (!is_array($upload)) {
+            return [];
         }
 
+        $uploads = $this->uploadedFiles($upload);
+        if ($uploads === []) {
+            return [];
+        }
+
+        $maxFiles = max(1, (int)($this->config['max_attachment_count'] ?? 4));
+        if (count($uploads) > $maxFiles) {
+            throw new \RuntimeException('Sólo puedes adjuntar hasta ' . $maxFiles . ' imágenes.');
+        }
+
+        $attachments = [];
+        foreach ($uploads as $index => $item) {
+            $attachments[] = $this->saveUploadedImage($uid, $item, (string)($alts[$index] ?? ''));
+        }
+
+        return $attachments;
+    }
+
+    private function saveUploadedImage(string $uid, array $upload, string $alt): array
+    {
         $error = (int)($upload['error'] ?? UPLOAD_ERR_OK);
         if ($error !== UPLOAD_ERR_OK) {
             throw new \RuntimeException($this->uploadErrorMessage($error));
@@ -80,6 +106,37 @@ final class MediaUploadService
             'name' => trim($alt),
             'summary' => trim($alt),
         ];
+    }
+
+    private function uploadedFiles(array $upload): array
+    {
+        if (is_array($upload['error'] ?? null)) {
+            $files = [];
+            $count = count($upload['error']);
+
+            for ($i = 0; $i < $count; $i++) {
+                $error = (int)($upload['error'][$i] ?? UPLOAD_ERR_NO_FILE);
+                if ($error === UPLOAD_ERR_NO_FILE) {
+                    continue;
+                }
+
+                $files[] = [
+                    'name' => $upload['name'][$i] ?? '',
+                    'type' => $upload['type'][$i] ?? '',
+                    'tmp_name' => $upload['tmp_name'][$i] ?? '',
+                    'error' => $error,
+                    'size' => $upload['size'][$i] ?? 0,
+                ];
+            }
+
+            return $files;
+        }
+
+        if ((int)($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return [];
+        }
+
+        return [(array)$upload];
     }
 
     private function uploadErrorMessage(int $error): string
