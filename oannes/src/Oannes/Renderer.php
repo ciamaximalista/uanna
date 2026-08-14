@@ -1054,6 +1054,10 @@ final class Renderer
             }
         }
         unset($id);
+        foreach ($nodes as &$node) {
+            $this->sortReplyNodesChronologically($node['children']);
+        }
+        unset($node);
 
         $roots = [];
         foreach ($order as $id) {
@@ -1072,6 +1076,29 @@ final class Renderer
         return $roots;
     }
 
+    private function sortReplyNodesChronologically(array &$nodes): void
+    {
+        usort($nodes, fn (array $a, array $b): int => strcmp(
+            ActivityPub::published($a['object']),
+            ActivityPub::published($b['object'])
+        ));
+
+        foreach ($nodes as &$node) {
+            if (is_array($node['children'] ?? null)) {
+                $this->sortReplyNodesChronologically($node['children']);
+            }
+        }
+        unset($node);
+    }
+
+    private function sortRootReplyNodesChronologically(array &$nodes): void
+    {
+        usort($nodes, fn (array $a, array $b): int => strcmp(
+            ActivityPub::published($a['object']),
+            ActivityPub::published($b['object'])
+        ));
+    }
+
     private function canonicalObjectId(string $id): string
     {
         if (isset($this->canonicalIdCache[$id])) {
@@ -1087,7 +1114,9 @@ final class Renderer
     private function replyTree(string $id): array
     {
         $children = $this->replyDescendants($id);
-        return $this->treeFor($children);
+        $tree = $this->treeFor($children);
+        $this->sortRootReplyNodesChronologically($tree);
+        return $tree;
     }
 
     private function replyDescendants(string $id, int $depth = 0): array
