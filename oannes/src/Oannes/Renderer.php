@@ -463,7 +463,9 @@ final class Renderer
     public function home(): string
     {
         $settings = new InstanceSettings(new FileStore($this->config['data_dir']), $this->config);
-        return $this->page('', '<section class="timeline">' . $this->instancePresentationCard($settings) . '</section>');
+        $timeline = $this->objectList($this->localTimeline(80));
+
+        return $this->page('', '<section class="timeline">' . $this->instancePresentationCard($settings) . $timeline . '</section>');
     }
 
     public function privateTimelinePage(string $uid, array $objects, string $csrf, string $nextUrl = ''): string
