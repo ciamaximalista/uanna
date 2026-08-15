@@ -313,6 +313,96 @@ final class AdminRenderer
             . '</div>';
     }
 
+    public function connectedPage(string $uid, array $items, array $localUsers): string
+    {
+        $csrf = Html::escape($this->auth->csrfToken());
+        $body = '<section class="object connected-page">'
+            . '<p><a class="button-link secondary" href="?route=admin">' . Html::escape($this->t('actions.back', 'Volver')) . '</a></p>'
+            . '<h1>' . Html::escape($this->t('network.connected_with', 'Conectados con...')) . '</h1>';
+
+        if ($items === []) {
+            $body .= '<p class="muted">' . Html::escape($this->t('network.no_connected_remotes', 'Todavía no hay usuarios remotos seguidos por miembros del nodo.')) . '</p>';
+            return $this->renderer->page($this->t('network.connected_with', 'Conectados con...'), $body . '</section>');
+        }
+
+        $body .= '<div class="connected-list">';
+        foreach ($items as $item) {
+            $actor = is_array($item['actor'] ?? null) ? $item['actor'] : [];
+            $actorId = is_string($item['actor_id'] ?? null) ? $item['actor_id'] : ActivityPub::objectId($actor);
+            if ($actorId === null || $actorId === '') {
+                continue;
+            }
+
+            $info = $this->renderer->actorInfo($actorId);
+            $name = (string)($info['label'] ?? $actorId);
+            $url = (string)($info['internal_url'] ?? $info['url'] ?? $actorId);
+            $avatar = (string)($info['avatar'] ?? '');
+            $initial = Html::escape(mb_strtoupper(mb_substr($name !== '' ? $name : '?', 0, 1)));
+            $avatarHtml = $avatar !== ''
+                ? '<img class="mini-avatar" src="' . Html::escape($avatar) . '" alt=""/>'
+                : '<span class="mini-avatar avatar-fallback">' . $initial . '</span>';
+            $state = is_array($item['state'] ?? null) ? $item['state'] : [];
+            $isFollowing = (bool)($state['following'] ?? false);
+            $isMuted = (bool)($state['muted'] ?? false);
+            $isBlocked = (bool)($state['blocked'] ?? false);
+            $followers = is_array($item['local_followers'] ?? null) ? $item['local_followers'] : [];
+
+            $body .= '<article class="connected-row">'
+                . '<div class="connected-main">'
+                . '<a class="actor-main" href="' . Html::escape($url) . '">' . $avatarHtml . '<span>' . Html::escape($name) . ' <small class="social-count">' . count($followers) . '</small></span></a>'
+                . $this->connectedActions($csrf, $actorId, $isFollowing, $isMuted, $isBlocked)
+                . '</div>'
+                . '<div class="connected-followers">' . $this->localFollowerAvatars($followers, $localUsers) . '</div>'
+                . '</article>';
+        }
+
+        return $this->renderer->page($this->t('network.connected_with', 'Conectados con...'), $body . '</div></section>');
+    }
+
+    private function connectedActions(string $csrf, string $actorId, bool $isFollowing, bool $isMuted, bool $isBlocked): string
+    {
+        $returnTo = Html::escape((string)($_SERVER['REQUEST_URI'] ?? '?route=admin/connected'));
+        $html = '<form method="post" action="?route=admin/social" class="actor-actions connected-actions">'
+            . '<input type="hidden" name="csrf" value="' . Html::escape($csrf) . '"/>'
+            . '<input type="hidden" name="actor" value="' . Html::escape($actorId) . '"/>'
+            . '<input type="hidden" name="return_to" value="' . $returnTo . '"/>';
+
+        if ($isFollowing) {
+            $html .= '<button type="submit" name="action" value="unfollow">' . Html::escape($this->t('actions.unfollow', 'No seguir')) . '</button>'
+                . '<button type="submit" name="action" value="' . ($isMuted ? 'unmute' : 'mute') . '">' . Html::escape($isMuted ? $this->t('actions.unmute', 'Quitar silencio') : $this->t('actions.mute', 'Silenciar')) . '</button>'
+                . '<button type="submit" name="action" value="' . ($isBlocked ? 'unblock' : 'block') . '" class="danger">' . Html::escape($isBlocked ? $this->t('actions.unblock', 'Desbloquear') : $this->t('actions.block', 'Bloquear')) . '</button>';
+        } else {
+            $html .= '<button type="submit" name="action" value="follow">' . Html::escape($this->t('actions.follow', 'Seguir')) . '</button>';
+        }
+
+        return $html . '</form>';
+    }
+
+    private function localFollowerAvatars(array $uids, array $localUsers): string
+    {
+        if ($uids === []) {
+            return '';
+        }
+
+        $html = '<span>' . Html::escape($this->t('network.followed_by_members', 'Seguido por')) . '</span><div class="connected-avatar-list">';
+        foreach ($uids as $uid) {
+            if (!is_string($uid) || !is_array($localUsers[$uid] ?? null)) {
+                continue;
+            }
+
+            $info = $this->renderer->localUserInfo($uid);
+            $avatar = (string)($info['avatar'] ?? '');
+            $name = (string)($localUsers[$uid]['name'] ?? $uid);
+            $url = (string)($info['url'] ?? '#');
+            $inner = $avatar !== ''
+                ? '<img src="' . Html::escape($avatar) . '" alt=""/>'
+                : '<span class="mini-avatar avatar-fallback">' . Html::escape(mb_strtoupper(mb_substr($name !== '' ? $name : $uid, 0, 1))) . '</span>';
+            $html .= '<a class="connected-local-avatar" href="' . Html::escape($url) . '" title="' . Html::escape($name) . '" aria-label="' . Html::escape($name) . '">' . $inner . '</a>';
+        }
+
+        return $html . '</div>';
+    }
+
     private function appBuildBox(string $csrf, array $status): string
     {
         $missing = is_array($status['missing'] ?? null) ? $status['missing'] : [];
@@ -572,6 +662,7 @@ final class AdminRenderer
             . '<label>' . Html::escape($this->t('network.follow_new_user', 'Seguir nuevo usuario')) . ' <input name="actor_query" placeholder="@usuario@servidor.org o https://..." required/></label>'
             . '<button type="submit">' . Html::escape($this->t('actions.follow', 'Seguir')) . '</button>'
             . '</form>'
+            . '<div class="network-tools"><a class="button-link secondary" href="?route=admin/connected">' . Html::escape($this->t('network.connected_with', 'Conectados con...')) . '</a></div>'
             . '<div class="social-columns">'
             . '<section><h3>' . Html::escape($this->t('network.followers', 'Seguidores')) . ' <span class="social-count">' . count($followers) . '</span></h3>' . $this->actorList($uid, $csrf, $followers, $socialStates, false) . '</section>'
             . '<section><h3>' . Html::escape($this->t('network.following', 'Seguidos')) . ' <span class="social-count">' . count($following) . '</span></h3>' . $this->actorList($uid, $csrf, $following, $socialStates, true) . '</section>'

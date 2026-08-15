@@ -171,6 +171,11 @@ final class Router
             return;
         }
 
+        if ($route === 'admin/connected') {
+            $this->adminConnected($method);
+            return;
+        }
+
         if ($route === 'instance-admin/social-graph') {
             $this->instanceAdminSocialGraph($method);
             return;
@@ -1515,6 +1520,100 @@ final class Router
         }
 
         echo $this->adminDashboard($uid, $auth, 'Mensaje privado enviado.');
+    }
+
+    private function adminConnected(string $method): void
+    {
+        $auth = $this->auth ?? new Auth($this->store);
+        $uid = $auth->currentUser();
+
+        if ($uid === null) {
+            header('Location: ?route=admin/login');
+            return;
+        }
+
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        echo (new AdminRenderer($this->renderer, $auth))->connectedPage(
+            $uid,
+            $this->connectedRemoteActors($uid),
+            $this->users->all()
+        );
+    }
+
+    private function connectedRemoteActors(string $viewerUid): array
+    {
+        $graph = new SocialGraph($this->store);
+        $relations = new SocialRelationService($this->store);
+        $localActorIds = [];
+        foreach ($this->users->all() as $uid => $_user) {
+            if (!is_string($uid)) {
+                continue;
+            }
+
+            $localActorIds[$this->users->actorId($uid)] = true;
+            foreach ($this->users->legacyActorIds($uid) as $legacyId) {
+                $localActorIds[$legacyId] = true;
+            }
+        }
+
+        $items = [];
+        foreach ($this->users->all() as $localUid => $_user) {
+            if (!is_string($localUid)) {
+                continue;
+            }
+
+            foreach ($graph->following($localUid) as $actor) {
+                $actorId = ActivityPub::objectId($actor);
+                if ($actorId === null) {
+                    continue;
+                }
+
+                $isLocal = false;
+                foreach (ActivityPub::aliases($actor) as $alias) {
+                    if (isset($localActorIds[$alias])) {
+                        $isLocal = true;
+                        break;
+                    }
+                }
+
+                if ($isLocal) {
+                    continue;
+                }
+
+                $key = $actorId;
+                $items[$key] ??= [
+                    'actor' => $actor,
+                    'actor_id' => $actorId,
+                    'local_followers' => [],
+                    'state' => [],
+                ];
+                $items[$key]['local_followers'][$localUid] = true;
+            }
+        }
+
+        foreach ($items as $actorId => &$item) {
+            $item['local_followers'] = array_keys($item['local_followers']);
+            sort($item['local_followers'], SORT_STRING);
+            $state = $relations->state($viewerUid, $actorId);
+            $state['following'] = $graph->isFollowing($viewerUid, $actorId);
+            $item['state'] = $state;
+        }
+        unset($item);
+
+        usort($items, static function (array $a, array $b): int {
+            $byCount = count($b['local_followers']) <=> count($a['local_followers']);
+            if ($byCount !== 0) {
+                return $byCount;
+            }
+
+            return strcmp((string)($a['actor_id'] ?? ''), (string)($b['actor_id'] ?? ''));
+        });
+
+        return array_values($items);
     }
 
     private function instanceAdminSocialGraph(string $method): void
