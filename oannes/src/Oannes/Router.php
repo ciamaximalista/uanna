@@ -2407,7 +2407,8 @@ final class Router
     private function adminDashboard(string $uid, Auth $auth, ?string $message = null, ?string $error = null): string
     {
         $focus = $_GET['focus'] ?? '';
-        if ($focus === 'notifications') {
+        $section = $_GET['section'] ?? '';
+        if ($focus === 'notifications' || $section === 'notifications') {
             $this->markNotificationsSeen($uid);
         }
 

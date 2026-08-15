@@ -266,16 +266,75 @@ final class AdminRenderer
 
         $focus = $_GET['focus'] ?? '';
         $focus = is_string($focus) ? $focus : '';
+        $section = $_GET['section'] ?? '';
+        $section = is_string($section) ? $section : '';
+        if ($focus === 'notifications') {
+            $section = 'notifications';
+        }
+        if ($timelineSearchQuery !== '') {
+            $section = 'search';
+        }
 
-        return $this->renderer->page($this->t('panel.user_title', 'Panel de usuario'), $messageHtml . $errorHtml
-            . $this->panelBox($this->t('profile.title', 'Perfil'), '<div class="admin-actions">' . $profileLink . '</div>' . $profileHtml)
-            . $this->panelBox($this->t('panel.search_timeline', 'Buscar en timeline'), $this->timelineSearch($timelineSearchQuery, $timelineSearchResults), $timelineSearchQuery !== '')
-            . $this->panelBox($this->t('panel.notifications', 'Notificaciones'), $notificationsHtml, $focus === 'notifications', 'notifications')
-            . $this->panelBox($this->t('panel.private_messages', 'Mensajes privados'), $privateHtml)
-            . $this->panelBox($this->t('panel.network', 'Red'), $socialHtml)
-            . $this->panelBox($this->t('panel.export_migrate', 'Exportar / Migrar'), $migrationHtml)
-            . ($appDownloadHtml !== '' ? $this->panelBox($this->t('panel.download_app', 'Descargar app'), $appDownloadHtml) : '')
-            . '<div class="panel-bottom-actions">' . $logout . '</div>');
+        $sections = [
+            'profile' => [
+                'title' => $this->t('profile.title', 'Perfil'),
+                'content' => '<div class="admin-actions">' . $profileLink . '</div>' . $profileHtml,
+            ],
+            'search' => [
+                'title' => $this->t('panel.search_timeline', 'Buscar en timeline'),
+                'content' => $this->timelineSearch($timelineSearchQuery, $timelineSearchResults),
+            ],
+            'notifications' => [
+                'title' => $this->t('panel.notifications', 'Notificaciones'),
+                'content' => $notificationsHtml,
+            ],
+            'private' => [
+                'title' => $this->t('panel.private_messages', 'Mensajes privados'),
+                'content' => $privateHtml,
+            ],
+            'network' => [
+                'title' => $this->t('panel.network', 'Red'),
+                'content' => $socialHtml,
+            ],
+            'migration' => [
+                'title' => $this->t('panel.export_migrate', 'Exportar / Migrar'),
+                'content' => $migrationHtml,
+            ],
+        ];
+
+        if ($appDownloadHtml !== '') {
+            $sections['app'] = [
+                'title' => $this->t('panel.download_app', 'Descargar app'),
+                'content' => $appDownloadHtml,
+            ];
+        }
+
+        $body = $messageHtml . $errorHtml;
+        if ($section !== '' && isset($sections[$section])) {
+            $body .= '<section class="object panel-view">'
+                . '<div class="panel-view-head"><a class="button-link secondary" href="?route=admin">' . Html::escape($this->t('panel.menu', 'Menú')) . '</a></div>'
+                . '<h1>' . Html::escape((string)$sections[$section]['title']) . '</h1>'
+                . (string)$sections[$section]['content']
+                . '</section>';
+        } else {
+            $body .= $this->panelMenu($sections);
+        }
+
+        return $this->renderer->page($this->t('panel.user_title', 'Panel de usuario'), $body . '<div class="panel-bottom-actions">' . $logout . '</div>');
+    }
+
+    private function panelMenu(array $sections): string
+    {
+        $html = '<section class="object panel-menu"><h1>' . Html::escape($this->t('panel.user_title', 'Panel de usuario')) . '</h1><nav class="panel-option-list">';
+
+        foreach ($sections as $key => $section) {
+            $html .= '<a class="panel-option" href="?route=admin&amp;section=' . Html::escape((string)$key) . '">'
+                . '<span>' . Html::escape((string)($section['title'] ?? $key)) . '</span>'
+                . '<span aria-hidden="true">›</span>'
+                . '</a>';
+        }
+
+        return $html . '</nav></section>';
     }
 
     private function panelBox(string $title, string $content, bool $open = false, string $id = ''): string
@@ -290,6 +349,7 @@ final class AdminRenderer
     {
         return '<form method="get" action="" class="timeline-search-form">'
             . '<input type="hidden" name="route" value="admin"/>'
+            . '<input type="hidden" name="section" value="search"/>'
             . '<label>' . Html::escape($this->t('actions.search', 'Buscar')) . ' <input name="timeline_q" value="' . Html::escape($query) . '" placeholder="' . Html::escape($this->t('panel.search_placeholder', 'Texto del mensaje')) . '"/></label>'
             . '<button type="submit">' . Html::escape($this->t('actions.search', 'Buscar')) . '</button>'
             . '</form>'
@@ -317,7 +377,7 @@ final class AdminRenderer
     {
         $csrf = Html::escape($this->auth->csrfToken());
         $body = '<section class="object connected-page">'
-            . '<p><a class="button-link secondary" href="?route=admin">' . Html::escape($this->t('actions.back', 'Volver')) . '</a></p>'
+            . '<p><a class="button-link secondary" href="?route=admin&amp;section=network">' . Html::escape($this->t('actions.back', 'Volver')) . '</a></p>'
             . '<h1>' . Html::escape($this->t('network.connected_with', 'Conectados con...')) . '</h1>';
 
         if ($items === []) {
