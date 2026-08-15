@@ -325,7 +325,7 @@ final class AdminRenderer
 
     private function panelMenu(array $sections): string
     {
-        $html = '<section class="object panel-menu"><h1>' . Html::escape($this->t('panel.user_title', 'Panel de usuario')) . '</h1><nav class="panel-option-list">';
+        $html = '<section class="object panel-menu"><nav class="panel-option-list">';
 
         foreach ($sections as $key => $section) {
             $html .= '<a class="panel-option" href="?route=admin&amp;section=' . Html::escape((string)$key) . '">'
