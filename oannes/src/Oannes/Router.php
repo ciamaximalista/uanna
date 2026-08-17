@@ -2417,13 +2417,12 @@ final class Router
         $timelineSearchQuery = is_string($timelineSearchQuery) ? trim($timelineSearchQuery) : '';
         $timeline = $this->privateTimeline($uid);
         $timelineSearchScope = $timelineSearchQuery !== '' ? $this->privateTimeline($uid, $this->timelineSearchLimit()) : [];
+        $timelineSearchActions = [
+            'uid' => $uid,
+            'csrf' => $auth->csrfToken(),
+        ];
         $timelineSearchResults = $timelineSearchQuery !== ''
-            ? $this->renderer->objectList($this->searchTimeline($timelineSearchScope, $timelineSearchQuery), false, [
-                'actions' => [
-                    'uid' => $uid,
-                    'csrf' => $auth->csrfToken(),
-                ],
-            ])
+            ? $this->renderer->threadedObjectList($this->searchTimeline($timelineSearchScope, $timelineSearchQuery), $timelineSearchActions)
             : '';
         $settings = new InstanceSettings($this->store, $this->config);
         $socialGraphPath = rtrim((string)($this->config['public_dir'] ?? dirname(__DIR__, 2) . '/public'), '/') . '/assets/instance/social-graph.png';

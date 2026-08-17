@@ -608,6 +608,11 @@ final class Renderer
         return $objects !== [] ? $this->objectList($objects, false, ['actions' => $actions]) : '';
     }
 
+    public function threadedObjectList(array $objects, ?array $actions): string
+    {
+        return $objects !== [] ? $this->profileTimeline($objects, $actions) : '';
+    }
+
     private function userTimelineObjects(string $uid, int $offset, int $limit): array
     {
         $localUsers = new LocalUsers(new FileStore($this->config['data_dir']), $this->config);
