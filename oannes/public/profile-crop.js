@@ -141,8 +141,72 @@
         }
     }
 
+    function initPersistentPostImages(input) {
+        if (input.dataset.persistentImagesInitialized === '1') {
+            return;
+        }
+
+        input.dataset.persistentImagesInitialized = '1';
+        const form = input.form;
+        let files = [];
+
+        const status = document.createElement('p');
+        status.className = 'file-selection-status muted';
+        status.setAttribute('aria-live', 'polite');
+        input.insertAdjacentElement('afterend', status);
+
+        function updateStatus() {
+            if (files.length === 0) {
+                status.textContent = '';
+                return;
+            }
+
+            status.textContent = files.map(function (file) {
+                return file.name;
+            }).join(', ');
+        }
+
+        function restoreInputFiles() {
+            if (files.length === 0 || typeof DataTransfer === 'undefined') {
+                return;
+            }
+
+            const transfer = new DataTransfer();
+            files.forEach(function (file) {
+                transfer.items.add(file);
+            });
+            input.files = transfer.files;
+        }
+
+        input.addEventListener('change', function () {
+            if (input.files && input.files.length > 0) {
+                files = Array.from(input.files).slice(0, 4);
+                restoreInputFiles();
+            }
+
+            updateStatus();
+        });
+
+        if (!form) {
+            return;
+        }
+
+        form.addEventListener('submit', restoreInputFiles);
+        form.addEventListener('formdata', function (event) {
+            if (files.length === 0 || !event.formData) {
+                return;
+            }
+
+            event.formData.delete(input.name);
+            files.forEach(function (file) {
+                event.formData.append(input.name, file, file.name);
+            });
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.image-cropper').forEach(initCropper);
+        document.querySelectorAll('input[type="file"][name="image_upload[]"]').forEach(initPersistentPostImages);
         document.querySelectorAll('.timeline-more').forEach(initInfiniteTimeline);
         document.addEventListener('click', function (event) {
             const button = event.target.closest('.timeline-more button');

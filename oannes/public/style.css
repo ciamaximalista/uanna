@@ -1485,6 +1485,12 @@ h3 {
     margin: 0.2rem 0 1rem;
 }
 
+.file-selection-status {
+    margin: 0.35rem 0 0;
+    font-size: 0.86rem;
+    overflow-wrap: anywhere;
+}
+
 .image-cropper {
     display: grid;
     gap: 0.65rem;
