@@ -2516,6 +2516,11 @@ final class Router
         $limit = $this->timelinePageSize();
         $actions = $this->currentActions();
 
+        if ($scope === 'public') {
+            Http::json($this->renderer->publicTimelineChunk($offset, $limit));
+            return;
+        }
+
         if ($scope === 'private') {
             $auth = $this->auth ?? new Auth($this->store);
             $uid = $auth->currentUser();

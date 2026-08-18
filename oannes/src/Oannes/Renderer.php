@@ -463,9 +463,14 @@ final class Renderer
     public function home(): string
     {
         $settings = new InstanceSettings(new FileStore($this->config['data_dir']), $this->config);
-        $timeline = $this->objectList($this->localTimeline(80));
+        $pageSize = $this->timelinePageSize();
+        $objects = $this->localTimeline($pageSize + 1);
+        $hasMore = count($objects) > $pageSize;
+        $objects = array_slice($objects, 0, $pageSize);
+        $timeline = $this->objectList($objects);
+        $nextUrl = $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'public', 'offset' => $pageSize]) : '';
 
-        return $this->page('', '<section class="timeline">' . $this->instancePresentationCard($settings) . $timeline . '</section>');
+        return $this->page('', '<section class="timeline">' . $this->instancePresentationCard($settings) . $timeline . $this->timelineMore($nextUrl) . '</section>');
     }
 
     public function privateTimelinePage(string $uid, array $objects, string $csrf, string $nextUrl = ''): string
@@ -606,6 +611,18 @@ final class Renderer
     public function timelineChunk(array $objects, ?array $actions): string
     {
         return $objects !== [] ? $this->objectList($objects, false, ['actions' => $actions]) : '';
+    }
+
+    public function publicTimelineChunk(int $offset, int $limit): array
+    {
+        $objects = $this->localTimeline($limit + 1, $offset);
+        $hasMore = count($objects) > $limit;
+        $objects = array_slice($objects, 0, $limit);
+
+        return [
+            'html' => $this->timelineChunk($objects, null),
+            'next' => $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'public', 'offset' => $offset + $limit]) : '',
+        ];
     }
 
     public function threadedObjectList(array $objects, ?array $actions): string
@@ -1344,25 +1361,26 @@ final class Renderer
         return $all;
     }
 
-    private function localTimeline(int $limit): array
+    private function localTimeline(int $limit, int $offset = 0): array
     {
         $actorIds = [];
         $boosts = [];
+        $fetchLimit = max($limit, $offset + $limit);
 
         foreach ($this->users->all() as $uid => $_user) {
             if (is_string($uid)) {
                 $actorIds[] = $this->users->actorId($uid);
                 $actorIds = array_merge($actorIds, $this->users->legacyActorIds($uid));
-                $boosts = array_merge($boosts, $this->interactions->boostedObjectsByUser($uid, $limit));
+                $boosts = array_merge($boosts, $this->interactions->boostedObjectsByUser($uid, $fetchLimit));
             }
         }
 
         $objects = array_merge(
-            $this->repo->byAnyActor(array_values(array_unique($actorIds)), $limit * 3),
+            $this->repo->byAnyActor(array_values(array_unique($actorIds)), $fetchLimit * 3),
             $boosts,
         );
 
-        return $this->sortTimelineObjects($this->publicObjects($objects), $limit);
+        return $this->sortTimelineObjects($this->publicObjects($objects), $limit, $offset);
     }
 
     private function publicObjects(array $objects): array
@@ -1424,7 +1442,7 @@ final class Renderer
         return $html . '</span>';
     }
 
-    private function sortTimelineObjects(array $objects, int $limit): array
+    private function sortTimelineObjects(array $objects, int $limit, int $offset = 0): array
     {
         $unique = [];
 
@@ -1441,7 +1459,7 @@ final class Renderer
             (string)($a['_oannes_boosted_at'] ?? ActivityPub::published($a))
         ));
 
-        return array_slice($objects, 0, $limit);
+        return array_slice($objects, $offset, $limit);
     }
 
     public function actorInfo(string $actorId): array
