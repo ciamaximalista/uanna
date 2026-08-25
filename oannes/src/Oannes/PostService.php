@@ -148,8 +148,15 @@ final class PostService
             'name' => (string)$mention['name'],
         ], $mentions);
 
+        $attachmentsProvided = (bool)($options['attachments_provided'] ?? false);
         $attachments = is_array($options['attachments'] ?? null) ? $options['attachments'] : [];
-        if ($attachments !== []) {
+        if ($attachmentsProvided) {
+            if ($attachments !== []) {
+                $note['attachment'] = $attachments;
+            } else {
+                unset($note['attachment']);
+            }
+        } elseif ($attachments !== []) {
             $note['attachment'] = $attachments;
         }
 

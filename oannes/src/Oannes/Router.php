@@ -34,6 +34,11 @@ final class Router
             return;
         }
 
+        if ($route === 'attachment-download') {
+            $this->attachmentDownload($method);
+            return;
+        }
+
         $this->runOpportunisticMaintenance($route, $method);
 
         if ($this->users->all() === [] && $route !== 'setup') {
@@ -314,6 +319,117 @@ final class Router
         header('Cache-Control: public, max-age=3600');
         header('Content-Length: ' . (string)filesize($file));
         readfile($file);
+    }
+
+    private function attachmentDownload(string $method): void
+    {
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $url = $_GET['url'] ?? '';
+        if (!is_string($url) || trim($url) === '') {
+            Http::notFound();
+            return;
+        }
+
+        $url = trim($url);
+        foreach ($this->localImageCandidates($url) as $file) {
+            if (!is_file($file)) {
+                continue;
+            }
+
+            $type = mime_content_type($file) ?: 'application/octet-stream';
+            if (!str_starts_with(strtolower($type), 'image/')) {
+                continue;
+            }
+
+            $this->sendAttachmentHeaders($type, $this->downloadFilename($url, $type), filesize($file) ?: null);
+            readfile($file);
+            return;
+        }
+
+        if (!str_starts_with($url, 'https://')) {
+            Http::notFound();
+            return;
+        }
+
+        $maxBytes = max(1, (int)($this->config['max_attachment_bytes'] ?? 26214400));
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => "Accept: image/*\r\nUser-Agent: Uanna attachment download\r\n",
+                'ignore_errors' => true,
+                'timeout' => 20,
+            ],
+        ]);
+        $body = @file_get_contents($url, false, $context, 0, $maxBytes + 1);
+        if (!is_string($body) || $body === '' || strlen($body) > $maxBytes) {
+            Http::notFound();
+            return;
+        }
+
+        $type = $this->responseContentType($http_response_header ?? []);
+        if ($type === null || !str_starts_with(strtolower($type), 'image/')) {
+            $info = @getimagesizefromstring($body);
+            $type = is_array($info) && is_string($info['mime'] ?? null) ? $info['mime'] : null;
+        }
+
+        if ($type === null || !str_starts_with(strtolower($type), 'image/')) {
+            Http::notFound();
+            return;
+        }
+
+        $this->sendAttachmentHeaders($type, $this->downloadFilename($url, $type), strlen($body));
+        echo $body;
+    }
+
+    private function responseContentType(array $headers): ?string
+    {
+        foreach ($headers as $header) {
+            if (!is_string($header) || stripos($header, 'Content-Type:') !== 0) {
+                continue;
+            }
+
+            $type = trim(substr($header, strlen('Content-Type:')));
+            $type = trim(explode(';', $type, 2)[0]);
+            if ($type !== '') {
+                return $type;
+            }
+        }
+
+        return null;
+    }
+
+    private function sendAttachmentHeaders(string $type, string $filename, ?int $length): void
+    {
+        header('Content-Type: ' . $type);
+        header('Content-Disposition: attachment; filename="' . addcslashes($filename, "\\\"") . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
+        header('Cache-Control: private, max-age=300');
+        if ($length !== null) {
+            header('Content-Length: ' . (string)$length);
+        }
+    }
+
+    private function downloadFilename(string $url, string $type): string
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+        $name = is_string($path) ? basename(rawurldecode($path)) : '';
+        $name = preg_replace('/[^\pL\pN._-]+/u', '-', $name) ?? '';
+        $name = trim($name, '.-');
+
+        if ($name === '') {
+            $extension = match (strtolower($type)) {
+                'image/png' => 'png',
+                'image/gif' => 'gif',
+                'image/webp' => 'webp',
+                default => 'jpg',
+            };
+            $name = 'imagen.' . $extension;
+        }
+
+        return $name;
     }
 
     private function html(): void
@@ -1118,6 +1234,7 @@ final class Router
         $id = $_POST['id'] ?? null;
         $content = $_POST['content'] ?? null;
         $imageAlt = $_POST['image_alt'] ?? '';
+        $existingAttachmentInput = $_POST['existing_attachment'] ?? [];
 
         if ($this->requestBodyExceedsPhpLimit()) {
             echo $this->adminDashboard($uid, $auth, null, 'La publicación supera el límite de subida configurado en PHP (' . ini_get('post_max_size') . ').');
@@ -1130,10 +1247,17 @@ final class Router
         }
 
         try {
-            $attachments = (new MediaUploadService($this->config))->saveImagesFromPost(
+            $alts = $this->attachmentAlts(is_string($imageAlt) ? $imageAlt : '');
+            $newAttachments = (new MediaUploadService($this->config))->saveImageSlotsFromPost(
                 $uid,
                 'image_upload',
-                $this->attachmentAlts(is_string($imageAlt) ? $imageAlt : '')
+                $alts
+            );
+            $attachments = $this->mergeEditedAttachments(
+                is_string($id) ? $id : '',
+                is_array($existingAttachmentInput) ? $existingAttachmentInput : [],
+                $newAttachments,
+                $alts
             );
             $note = (new PostService(
                 $this->store,
@@ -1143,6 +1267,7 @@ final class Router
                 $this->config,
             ))->updateNote($uid, $id, $content, [
                 'attachments' => $attachments,
+                'attachments_provided' => true,
             ]);
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
@@ -3079,6 +3204,91 @@ final class Router
     {
         $lines = preg_split('/\R/u', $text) ?: [];
         return array_map(static fn (string $line): string => trim($line), $lines);
+    }
+
+    private function mergeEditedAttachments(string $id, array $existingInput, array $newAttachments, array $alts): array
+    {
+        $object = $this->repo->findByIdOrAlias($id);
+        $existingOriginal = is_array($object) ? $this->imageAttachmentsForEdit($object) : [];
+        $merged = [];
+        $max = max(1, (int)($this->config['max_attachment_count'] ?? 4));
+
+        for ($i = 0; $i < $max; $i++) {
+            if (is_array($newAttachments[$i] ?? null)) {
+                $merged[] = $newAttachments[$i];
+                continue;
+            }
+
+            $candidate = $this->decodeExistingAttachment((string)($existingInput[$i] ?? ''));
+            if ($candidate === null || !isset($existingOriginal[$i]) || !$this->sameAttachment($candidate, $existingOriginal[$i])) {
+                continue;
+            }
+
+            $alt = trim((string)($alts[$i] ?? ''));
+            if ($alt !== '') {
+                $candidate['name'] = $alt;
+                $candidate['summary'] = $alt;
+            } else {
+                unset($candidate['name'], $candidate['summary']);
+            }
+
+            $merged[] = $candidate;
+        }
+
+        return $merged;
+    }
+
+    private function decodeExistingAttachment(string $encoded): ?array
+    {
+        if ($encoded === '') {
+            return null;
+        }
+
+        $json = base64_decode($encoded, true);
+        if (!is_string($json) || $json === '') {
+            return null;
+        }
+
+        $attachment = json_decode($json, true);
+        return is_array($attachment) ? $attachment : null;
+    }
+
+    private function imageAttachmentsForEdit(array $object): array
+    {
+        $attachments = $object['attachment'] ?? [];
+        $attachments = is_array($attachments) && array_is_list($attachments) ? $attachments : [$attachments];
+        $images = [];
+
+        foreach ($attachments as $attachment) {
+            if (!is_array($attachment)) {
+                continue;
+            }
+
+            $mediaType = is_string($attachment['mediaType'] ?? null) ? strtolower($attachment['mediaType']) : '';
+            if (!str_starts_with($mediaType, 'image/')) {
+                continue;
+            }
+
+            $url = $attachment['url'] ?? $attachment['href'] ?? null;
+            if (!is_string($url) || $url === '') {
+                continue;
+            }
+
+            $images[] = $attachment;
+        }
+
+        return array_slice($images, 0, max(1, (int)($this->config['max_attachment_count'] ?? 4)));
+    }
+
+    private function sameAttachment(array $a, array $b): bool
+    {
+        foreach (['url', 'href', 'mediaType', 'type'] as $field) {
+            if (($a[$field] ?? null) !== ($b[$field] ?? null)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function privateMessageFromObject(array $object): ?array

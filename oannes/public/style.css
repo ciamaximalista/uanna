@@ -278,6 +278,64 @@ main {
     box-sizing: border-box;
 }
 
+.post-image-inputs {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0 0 0.9rem;
+}
+
+.compose-modal .post-image-slot {
+    display: none;
+    margin: 0;
+}
+
+.compose-modal .post-image-slot.is-visible {
+    display: grid;
+}
+
+.compose-modal input.post-image-input {
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.compose-modal input.post-image-input::file-selector-button {
+    min-height: 2.1rem;
+    margin-right: 0.7rem;
+    padding: 0.45rem 0.75rem;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #061112;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.compose-modal input.post-image-input::-webkit-file-upload-button {
+    min-height: 2.1rem;
+    margin-right: 0.7rem;
+    padding: 0.45rem 0.75rem;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #061112;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.compose-modal input.post-image-input.has-files::file-selector-button {
+    background: var(--accent-strong);
+}
+
+.compose-modal input.post-image-input.has-files::-webkit-file-upload-button {
+    background: var(--accent-strong);
+}
+
 .compose-modal button {
     min-height: 2.75rem;
     padding: 0.72rem 0.85rem;
@@ -1488,6 +1546,7 @@ h3 {
 .file-selection-status {
     margin: 0.35rem 0 0;
     font-size: 0.86rem;
+    color: var(--text);
     overflow-wrap: anywhere;
 }
 

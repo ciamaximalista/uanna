@@ -248,13 +248,49 @@ final class Renderer
                 . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required></textarea></label>'
                 . '<label>' . Html::escape($this->t('field.reply_to', 'Responder a')) . ' <input name="inReplyTo" type="url" placeholder="https://..."/></label>'
                 . '<label>' . Html::escape($this->t('field.visibility', 'Visibilidad')) . ' <select name="visibility"><option value="public">' . Html::escape($this->t('visibility.public', 'Pública')) . '</option><option value="followers">' . Html::escape($this->t('visibility.followers_only', 'Sólo para seguidores')) . '</option></select></label>'
-                . '<label>' . Html::escape($this->t('field.images', 'Imágenes')) . ' <input name="image_upload[]" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple/></label>'
+                . $this->postImageInputs()
                 . '<label>' . Html::escape($this->t('field.alt_texts', 'Textos alt, uno por línea')) . ' <textarea name="image_alt" rows="4"></textarea></label>'
                 . '<button type="submit">' . Html::escape($this->t('post.publish', 'Publicar')) . '</button>'
                 . '</form>'
                 . '</article>'
                 . '</section>',
         ];
+    }
+
+    private function postImageInputs(array $attachments = []): string
+    {
+        $label = Html::escape($this->t('field.images', 'Imágenes'));
+        $html = '<div class="post-image-inputs" aria-label="' . $label . '">';
+        $visibleCount = min(4, max(1, count($attachments) + 1));
+
+        for ($i = 0; $i < 4; $i++) {
+            $class = $i < $visibleCount ? 'post-image-slot is-visible' : 'post-image-slot';
+            $existing = is_array($attachments[$i] ?? null) ? $attachments[$i] : null;
+            $existingInput = $existing !== null
+                ? '<input type="hidden" name="existing_attachment[]" value="' . Html::escape(base64_encode(Json::encode($existing))) . '"/>'
+                : '<input type="hidden" name="existing_attachment[]" value=""/>';
+            $html .= '<label class="' . $class . '">' . ($i === 0 ? $label : Html::escape($this->t('field.image_extra', 'Otra imagen')))
+                . ' <input name="image_upload[]" type="file" accept="image/*"/>'
+                . $existingInput
+                . ($existing !== null ? $this->existingAttachmentLabel($existing) : '')
+                . '</label>';
+        }
+
+        return $html . '</div>';
+    }
+
+    private function existingAttachmentLabel(array $attachment): string
+    {
+        $url = $this->attachmentUrl($attachment);
+        if ($url === '') {
+            return '';
+        }
+
+        $alt = $this->attachmentAlt($attachment);
+        $label = $alt !== '' ? $alt : basename((string)(parse_url($url, PHP_URL_PATH) ?: $url));
+
+        return '<span class="existing-attachment">' . Html::escape($this->t('attachment.current', 'Imagen actual')) . ': '
+            . '<a href="' . Html::escape($url) . '" target="_blank" rel="noopener">' . Html::escape($label) . '</a></span>';
     }
 
     private function reloadUrl(): string
@@ -933,15 +969,10 @@ final class Renderer
                 continue;
             }
 
-            $alt = '';
-            foreach (['name', 'summary'] as $field) {
-                if (is_string($attachment[$field] ?? null) && trim($attachment[$field]) !== '') {
-                    $alt = trim($attachment[$field]);
-                    break;
-                }
-            }
+            $alt = $this->attachmentAlt($attachment);
 
             $safeUrl = Html::escape($url);
+            $downloadUrl = Html::escape($this->publicUrl(['route' => 'attachment-download', 'url' => $url]));
             $modalId = 'attachment-' . substr(Id::digest($objectId . "\n" . $url), 0, 16);
             $safeModalId = Html::escape($modalId);
             $backHref = $postAnchor !== '' ? '#' . Html::escape($postAnchor) : '#';
@@ -958,7 +989,7 @@ final class Renderer
                 . ($alt !== '' ? '<figcaption>' . $safeAlt . '</figcaption>' : '')
                 . '</figure>'
                 . '<nav class="attachment-modal-actions" aria-label="' . Html::escape($this->t('attachment.actions', 'Acciones de imagen')) . '">'
-                . '<a class="button-link" href="' . $safeUrl . '" download>' . Html::escape($this->t('actions.download', 'Descargar')) . '</a>'
+                . '<a class="button-link" href="' . $downloadUrl . '">' . Html::escape($this->t('actions.download', 'Descargar')) . '</a>'
                 . '<a class="button-link secondary" href="' . $backHref . '">' . Html::escape($this->t('actions.back', 'Volver')) . '</a>'
                 . '</nav>'
                 . '</article>'
@@ -988,6 +1019,44 @@ final class Renderer
         }
 
         return '';
+    }
+
+    private function attachmentAlt(array $attachment): string
+    {
+        foreach (['name', 'summary'] as $field) {
+            if (is_string($attachment[$field] ?? null) && trim($attachment[$field]) !== '') {
+                return trim($attachment[$field]);
+            }
+        }
+
+        return '';
+    }
+
+    private function imageAttachments(array $object): array
+    {
+        $attachments = $object['attachment'] ?? [];
+        $attachments = is_array($attachments) && array_is_list($attachments) ? $attachments : [$attachments];
+        $images = [];
+
+        foreach ($attachments as $attachment) {
+            if (!is_array($attachment)) {
+                continue;
+            }
+
+            $mediaType = is_string($attachment['mediaType'] ?? null) ? strtolower($attachment['mediaType']) : '';
+            if (!str_starts_with($mediaType, 'image/') || $this->attachmentUrl($attachment) === '') {
+                continue;
+            }
+
+            $images[] = $attachment;
+        }
+
+        return array_slice($images, 0, 4);
+    }
+
+    private function attachmentAltLines(array $attachments): string
+    {
+        return implode("\n", array_map(fn (array $attachment): string => $this->attachmentAlt($attachment), $attachments));
     }
 
     private function boostMarker(string $actorId, string $boostedAt, string $boostedHuman): string
@@ -1088,7 +1157,7 @@ final class Renderer
             . '<input type="hidden" name="inReplyTo" value="' . $encodedId . '"/>'
             . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required></textarea></label>'
             . '<label>' . Html::escape($this->t('field.visibility', 'Visibilidad')) . ' <select name="visibility"><option value="public">' . Html::escape($this->t('visibility.public', 'Pública')) . '</option><option value="followers">' . Html::escape($this->t('visibility.followers_only', 'Sólo para seguidores')) . '</option></select></label>'
-            . '<label>' . Html::escape($this->t('field.images', 'Imágenes')) . ' <input name="image_upload[]" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple/></label>'
+            . $this->postImageInputs()
             . '<label>' . Html::escape($this->t('field.alt_texts', 'Textos alt, uno por línea')) . ' <textarea name="image_alt" rows="4"></textarea></label>'
             . '<div class="modal-actions"><button type="submit">' . Html::escape($this->t('actions.send', 'Enviar')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '</a></div>'
             . '</form>'
@@ -1130,6 +1199,8 @@ final class Renderer
         $encodedId = Html::escape($id);
         $suffix = Html::escape(substr(Id::digest($id), 0, 12));
         $source = Html::escape((string)($object['sourceContent'] ?? strip_tags((string)($object['content'] ?? ''))));
+        $attachments = $this->imageAttachments($object);
+        $altText = Html::escape($this->attachmentAltLines($attachments));
 
         return '<div class="own-post-actions">'
             . '<a class="button-link secondary" href="#edit-' . $suffix . '">' . Html::escape($this->t('actions.edit', 'Editar')) . '</a>'
@@ -1142,8 +1213,8 @@ final class Renderer
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
             . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required>' . $source . '</textarea></label>'
-            . '<label>' . Html::escape($this->t('field.images', 'Imágenes')) . ' <input name="image_upload[]" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple/></label>'
-            . '<label>' . Html::escape($this->t('field.alt_texts', 'Textos alt, uno por línea')) . ' <textarea name="image_alt" rows="4"></textarea></label>'
+            . $this->postImageInputs($attachments)
+            . '<label>' . Html::escape($this->t('field.alt_texts', 'Textos alt, uno por línea')) . ' <textarea name="image_alt" rows="4">' . $altText . '</textarea></label>'
             . '<div class="modal-actions"><button type="submit">' . Html::escape($this->t('actions.send', 'Enviar')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '</a></div>'
             . '</form></article></section>'
             . '<section id="delete-' . $suffix . '" class="modal-overlay" aria-label="' . Html::escape($this->t('post.delete', 'Borrar publicación')) . '">'

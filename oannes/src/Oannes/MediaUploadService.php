@@ -40,6 +40,45 @@ final class MediaUploadService
         return $attachments;
     }
 
+    public function saveImageSlotsFromPost(string $uid, string $field, array $alts = []): array
+    {
+        $upload = $_FILES[$field] ?? null;
+
+        if (!is_array($upload)) {
+            return [];
+        }
+
+        $maxFiles = max(1, (int)($this->config['max_attachment_count'] ?? 4));
+        $slots = [];
+
+        if (is_array($upload['error'] ?? null)) {
+            $count = min(count($upload['error']), $maxFiles);
+
+            for ($i = 0; $i < $count; $i++) {
+                $error = (int)($upload['error'][$i] ?? UPLOAD_ERR_NO_FILE);
+                if ($error === UPLOAD_ERR_NO_FILE) {
+                    continue;
+                }
+
+                $slots[$i] = $this->saveUploadedImage($uid, [
+                    'name' => $upload['name'][$i] ?? '',
+                    'type' => $upload['type'][$i] ?? '',
+                    'tmp_name' => $upload['tmp_name'][$i] ?? '',
+                    'error' => $error,
+                    'size' => $upload['size'][$i] ?? 0,
+                ], (string)($alts[$i] ?? ''));
+            }
+
+            return $slots;
+        }
+
+        if ((int)($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return [];
+        }
+
+        return [0 => $this->saveUploadedImage($uid, (array)$upload, (string)($alts[0] ?? ''))];
+    }
+
     private function saveUploadedImage(string $uid, array $upload, string $alt): array
     {
         $error = (int)($upload['error'] ?? UPLOAD_ERR_OK);

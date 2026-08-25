@@ -49,7 +49,10 @@
                 URL.revokeObjectURL(url);
                 loaded = true;
                 canvas.hidden = false;
-                preview.querySelector('img, span')?.remove();
+                const previous = preview.querySelector('img, span');
+                if (previous) {
+                    previous.remove();
+                }
                 draw();
             };
             img.src = url;
@@ -147,8 +150,10 @@
         }
 
         input.dataset.persistentImagesInitialized = '1';
-        const form = input.form;
         let files = [];
+        let refreshTimer = 0;
+
+        input.classList.add('post-image-input');
 
         const status = document.createElement('p');
         status.className = 'file-selection-status muted';
@@ -156,14 +161,29 @@
         input.insertAdjacentElement('afterend', status);
 
         function updateStatus() {
+            if (input.files && input.files.length > 0) {
+                files = Array.from(input.files).slice(0, 4);
+            }
+
             if (files.length === 0) {
                 status.textContent = '';
+                input.classList.remove('has-files');
                 return;
             }
 
-            status.textContent = files.map(function (file) {
+            input.classList.add('has-files');
+            status.textContent = 'Archivos seleccionados: ' + files.map(function (file) {
                 return file.name;
             }).join(', ');
+            revealNextImageSlot(input);
+        }
+
+        input.oannesUpdateSelectedFiles = updateStatus;
+
+        function scheduleStatusUpdate() {
+            window.clearTimeout(refreshTimer);
+            updateStatus();
+            refreshTimer = window.setTimeout(updateStatus, 350);
         }
 
         function restoreInputFiles() {
@@ -184,30 +204,72 @@
                 restoreInputFiles();
             }
 
-            updateStatus();
+            scheduleStatusUpdate();
         });
+        input.addEventListener('input', scheduleStatusUpdate);
+        input.addEventListener('blur', scheduleStatusUpdate);
+        input.addEventListener('focus', function () {
+            window.oannesActivePostImageInput = input;
+        });
+        input.addEventListener('click', function () {
+            window.oannesActivePostImageInput = input;
+        });
+    }
 
-        if (!form) {
+    function revealNextImageSlot(input) {
+        const slot = input.closest('.post-image-slot');
+        const group = input.closest('.post-image-inputs');
+        if (!slot || !group) {
             return;
         }
 
-        form.addEventListener('submit', restoreInputFiles);
-        form.addEventListener('formdata', function (event) {
-            if (files.length === 0 || !event.formData) {
-                return;
-            }
+        const slots = Array.from(group.querySelectorAll('.post-image-slot'));
+        const index = slots.indexOf(slot);
+        const next = index >= 0 ? slots[index + 1] : null;
+        if (next) {
+            next.classList.add('is-visible');
+        }
+    }
 
-            event.formData.delete(input.name);
-            files.forEach(function (file) {
-                event.formData.append(input.name, file, file.name);
-            });
-        });
+    function isPostImageInput(input) {
+        return input
+            && input.tagName === 'INPUT'
+            && input.type === 'file'
+            && input.name === 'image_upload[]';
+    }
+
+    function updatePostImageInput(input) {
+        if (!isPostImageInput(input)) {
+            return;
+        }
+
+        initPersistentPostImages(input);
+        if (typeof input.oannesUpdateSelectedFiles === 'function') {
+            input.oannesUpdateSelectedFiles();
+        }
+    }
+
+    function updateActivePostImageInput() {
+        const input = window.oannesActivePostImageInput;
+        if (isPostImageInput(input)) {
+            updatePostImageInput(input);
+        }
     }
 
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.image-cropper').forEach(initCropper);
-        document.querySelectorAll('input[type="file"][name="image_upload[]"]').forEach(initPersistentPostImages);
+        document.querySelectorAll('input[type="file"]').forEach(updatePostImageInput);
         document.querySelectorAll('.timeline-more').forEach(initInfiniteTimeline);
+        document.addEventListener('change', function (event) {
+            updatePostImageInput(event.target);
+        }, true);
+        window.addEventListener('focus', updateActivePostImageInput);
+        window.addEventListener('pageshow', updateActivePostImageInput);
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) {
+                updateActivePostImageInput();
+            }
+        });
         document.addEventListener('click', function (event) {
             const button = event.target.closest('.timeline-more button');
             if (!button) {
