@@ -57,7 +57,7 @@ final class AndroidAppBuilder
         $androidDir = $root . '/android';
         $publicDir = rtrim((string)($this->config['public_dir'] ?? $root . '/oannes/public'), '/');
         $assetsDir = $publicDir . '/assets/instance';
-        $apkSource = $androidDir . '/app/build/outputs/apk/debug/app-debug.apk';
+        $apkSource = $this->androidBuildDir() . '/outputs/apk/debug/app-debug.apk';
         $apkTarget = $assetsDir . '/uanna-app.apk';
         $apkUrl = '/assets/instance/uanna-app.apk';
 
@@ -223,20 +223,46 @@ final class AndroidAppBuilder
         $gradle = $this->gradlePath($androidDir);
         $javaHome = $this->javaHome($androidDir);
         $sdk = $this->sdkPath($androidDir);
+        $appStateDir = $this->store->dataDir() . '/app';
+        $userSuffix = $this->processUserSuffix();
+        $gradleHome = $appStateDir . '/gradle-home-' . $userSuffix;
+        $tmpDir = $appStateDir . '/tmp-' . $userSuffix;
+        $androidUserHome = $appStateDir . '/android-home-' . $userSuffix;
+        $androidBuildDir = $this->androidBuildDir();
+        $signingDir = $appStateDir . '/signing';
+        $debugKeystore = $signingDir . '/debug.keystore';
+
+        foreach ([$appStateDir, $gradleHome, $tmpDir, $androidUserHome, $androidBuildDir, $signingDir] as $dir) {
+            if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+                throw new \RuntimeException('No se pudo preparar el entorno de compilación Android.');
+            }
+            @chmod($dir, 02775);
+        }
+
+        $this->ensureDebugKeystore($androidDir, $debugKeystore);
+
         $command = 'cd ' . escapeshellarg($androidDir)
-            . ' && GRADLE_USER_HOME=' . escapeshellarg($androidDir . '/.gradle')
+            . ' && HOME=' . escapeshellarg($appStateDir)
+            . ' TMPDIR=' . escapeshellarg($tmpDir)
+            . ' GRADLE_USER_HOME=' . escapeshellarg($gradleHome)
             . ' JAVA_HOME=' . escapeshellarg($javaHome)
+            . ' JAVA_TOOL_OPTIONS=' . escapeshellarg('-Duser.home=' . $androidUserHome)
+            . ' GRADLE_OPTS=' . escapeshellarg('-Duser.home=' . $androidUserHome)
+            . ' UANNA_ANDROID_KEYSTORE=' . escapeshellarg($debugKeystore)
+            . ' UANNA_ANDROID_BUILD_DIR=' . escapeshellarg($androidBuildDir)
             . ' ANDROID_HOME=' . escapeshellarg($sdk)
             . ' ANDROID_SDK_ROOT=' . escapeshellarg($sdk)
+            . ' ANDROID_USER_HOME=' . escapeshellarg($androidUserHome)
+            . ' PATH=' . escapeshellarg($javaHome . '/bin:' . $sdk . '/platform-tools:' . $sdk . '/cmdline-tools/latest/bin:/usr/local/bin:/usr/bin:/bin')
             . ' ' . escapeshellarg($gradle)
-            . ' --no-daemon assembleDebug 2>&1';
+            . ' --no-daemon --stacktrace assembleDebug 2>&1';
 
         $output = [];
         $code = 0;
         exec($command, $output, $code);
 
         if ($code !== 0) {
-            $tail = implode("\n", array_slice($output, -30));
+            $tail = implode("\n", array_slice($output, -80));
             throw new \RuntimeException("No se pudo compilar la app:\n" . $tail);
         }
     }
@@ -305,6 +331,66 @@ final class AndroidAppBuilder
         }
 
         return '';
+    }
+
+    private function processUserSuffix(): string
+    {
+        if (function_exists('posix_geteuid')) {
+            return (string)posix_geteuid();
+        }
+
+        return 'web';
+    }
+
+    private function androidBuildDir(): string
+    {
+        return $this->store->dataDir() . '/app/android-build-' . $this->processUserSuffix();
+    }
+
+    private function ensureDebugKeystore(string $androidDir, string $debugKeystore): void
+    {
+        if (is_file($debugKeystore)) {
+            @chmod($debugKeystore, 0664);
+            return;
+        }
+
+        $legacy = getenv('HOME');
+        if (is_string($legacy) && $legacy !== '') {
+            $legacy = rtrim($legacy, '/') . '/.android/debug.keystore';
+            if (is_file($legacy) && copy($legacy, $debugKeystore)) {
+                @chmod($debugKeystore, 0664);
+                return;
+            }
+        }
+
+        $javaHome = $this->javaHome($androidDir);
+        $keytool = $javaHome !== '' ? $javaHome . '/bin/keytool' : '';
+        if ($keytool === '' || !is_file($keytool)) {
+            throw new \RuntimeException('No se pudo preparar la firma Android: falta keytool.');
+        }
+
+        $command = escapeshellarg($keytool)
+            . ' -genkeypair -v'
+            . ' -keystore ' . escapeshellarg($debugKeystore)
+            . ' -storepass android'
+            . ' -alias androiddebugkey'
+            . ' -keypass android'
+            . ' -keyalg RSA'
+            . ' -keysize 2048'
+            . ' -validity 10000'
+            . ' -dname ' . escapeshellarg('CN=Android Debug,O=Android,C=US')
+            . ' 2>&1';
+
+        $output = [];
+        $code = 0;
+        exec($command, $output, $code);
+
+        if ($code !== 0 || !is_file($debugKeystore)) {
+            $tail = implode("\n", array_slice($output, -20));
+            throw new \RuntimeException("No se pudo preparar la firma Android:\n" . $tail);
+        }
+
+        @chmod($debugKeystore, 0664);
     }
 
     private function manifestPath(): string

@@ -2,9 +2,11 @@ package com.ciamaximalista.uanna;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -13,9 +15,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Environment;
 import android.view.View;
 import android.view.Window;
 import android.webkit.CookieManager;
+import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -23,6 +27,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.ProgressBar;
+import android.widget.Toast;
 
 public final class MainActivity extends Activity {
     private static final String CHANNEL_ID = "uanna_notifications";
@@ -128,6 +133,72 @@ public final class MainActivity extends Activity {
 
         webView.setWebViewClient(new UannaWebViewClient());
         webView.setWebChromeClient(new UannaWebChromeClient());
+        webView.setDownloadListener(this::downloadFile);
+    }
+
+    private void downloadFile(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+        if (url == null || url.trim().isEmpty()) {
+            return;
+        }
+
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+            return;
+        }
+
+        String filename = URLUtil.guessFileName(url, contentDisposition, mimeType);
+        DownloadManager.Request request = downloadRequest(uri, filename, mimeType, cookieFor(url), userAgent, true);
+
+        DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+            return;
+        }
+
+        try {
+            manager.enqueue(request);
+        } catch (SecurityException | IllegalArgumentException e) {
+            try {
+                manager.enqueue(downloadRequest(uri, filename, mimeType, cookieFor(url), userAgent, false));
+            } catch (SecurityException | IllegalArgumentException ignored) {
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return;
+            }
+        }
+        Toast.makeText(this, "Descarga iniciada", Toast.LENGTH_SHORT).show();
+    }
+
+    private DownloadManager.Request downloadRequest(Uri uri, String filename, String mimeType, String cookie, String userAgent, boolean publicDownloads) {
+        DownloadManager.Request request = new DownloadManager.Request(uri)
+            .setTitle(filename)
+            .setDescription(getString(R.string.app_name))
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true);
+
+        if (publicDownloads) {
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+        }
+
+        if (mimeType != null && !mimeType.trim().isEmpty()) {
+            request.setMimeType(mimeType);
+        }
+
+        if (cookie != null && !cookie.trim().isEmpty()) {
+            request.addRequestHeader("Cookie", cookie);
+        }
+
+        if (userAgent != null && !userAgent.trim().isEmpty()) {
+            request.addRequestHeader("User-Agent", userAgent);
+        }
+
+        return request;
+    }
+
+    private String cookieFor(String url) {
+        return CookieManager.getInstance().getCookie(url);
     }
 
     private void pollBadgeCount() {
