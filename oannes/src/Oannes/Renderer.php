@@ -744,7 +744,7 @@ final class Renderer
                     $renderedRoots[$rootId] = true;
                 }
 
-                $html .= $this->timelineDaySeparator($node['object'], $lastDay);
+                $html .= $this->timelineDaySeparator($node['object'], $lastDay, $this->threadActivityDate($node));
                 $html .= $this->objectCard($node['object'], false, [
                     'children' => $node['children'] ?? [],
                     'actions' => $actions,
@@ -854,7 +854,7 @@ final class Renderer
         foreach ($tree as $node) {
             if (is_array($node['object'] ?? null)) {
                 if (!$child) {
-                    $html .= $this->timelineDaySeparator($node['object'], $lastDay);
+                    $html .= $this->timelineDaySeparator($node['object'], $lastDay, $this->threadActivityDate($node));
                 }
                 $html .= $this->objectCard($node['object'], $child, [
                     'children' => $node['children'] ?? [],
@@ -866,9 +866,9 @@ final class Renderer
         return $html;
     }
 
-    private function timelineDaySeparator(array $object, ?string &$lastDay): string
+    private function timelineDaySeparator(array $object, ?string &$lastDay, ?string $date = null): string
     {
-        $date = $this->timelineSortDate($object);
+        $date = is_string($date) && $date !== '' ? $date : $this->timelineSortDate($object);
         $timezone = (string)($this->config['timezone'] ?? 'Europe/Madrid');
         $day = DateFormat::dayKey($date, $timezone);
         if ($day === '') {
@@ -1358,8 +1358,8 @@ final class Renderer
         }
 
         usort($roots, fn (array $a, array $b): int => strcmp(
-            ActivityPub::published($b['object']),
-            ActivityPub::published($a['object'])
+            $this->threadActivityDate($b),
+            $this->threadActivityDate($a)
         ));
 
         return $roots;
@@ -1386,6 +1386,25 @@ final class Renderer
             ActivityPub::published($a['object']),
             ActivityPub::published($b['object'])
         ));
+    }
+
+    private function threadActivityDate(array $node): string
+    {
+        $object = is_array($node['object'] ?? null) ? $node['object'] : [];
+        $latest = $this->timelineSortDate($object);
+
+        foreach ((array)($node['children'] ?? []) as $child) {
+            if (!is_array($child)) {
+                continue;
+            }
+
+            $childDate = $this->threadActivityDate($child);
+            if ($childDate > $latest) {
+                $latest = $childDate;
+            }
+        }
+
+        return $latest;
     }
 
     private function canonicalObjectId(string $id): string

@@ -106,6 +106,29 @@ final class InstanceSettings
         return $this->readList('blocked_actors.json');
     }
 
+    public function defaultFollowingActors(): array
+    {
+        return $this->readList('default_following_actors.json');
+    }
+
+    public function addDefaultFollowingActor(string $actor): void
+    {
+        if ($actor === '') {
+            throw new \RuntimeException('Actor no válido.');
+        }
+
+        $this->writeList('default_following_actors.json', array_values(array_unique([...$this->defaultFollowingActors(), $actor])));
+    }
+
+    public function removeDefaultFollowingActor(string $actor): void
+    {
+        $actor = trim($actor);
+        $this->writeList('default_following_actors.json', array_values(array_filter(
+            $this->defaultFollowingActors(),
+            static fn (string $item): bool => $item !== $actor
+        )));
+    }
+
     public function addBlockedActor(string $actor): void
     {
         if ($actor === '') {

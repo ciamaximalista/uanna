@@ -22,6 +22,7 @@ final class SimulationRunner
             $this->scenarioCanonicalReplyTarget($i);
             $this->scenarioLocalUserAutoFollow($i);
             $this->scenarioAdminSocializeUser($i);
+            $this->scenarioDefaultFollowingForNewUser($i);
             $this->scenarioUserArchive($i);
             $this->scenarioInboxSecurity($i);
             $this->scenarioNegativeInputs($i);
@@ -327,6 +328,36 @@ final class SimulationRunner
         $this->check('admin socialize follows actor from second local user', $graph->isFollowing('bea', (string)$remote['id']));
         $this->check('admin socialize queues remote follows', count($this->deliverJobs($env['queue'])) === 2);
         $this->check('admin socialize reports additions', ($result['followed'] ?? 0) === 2);
+    }
+
+    private function scenarioDefaultFollowingForNewUser(int $iteration): void
+    {
+        $env = $this->environment('default-following-' . $iteration);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $remote = [
+            'id' => 'https://remote.test/default-' . $iteration,
+            'type' => 'Person',
+            'preferredUsername' => 'default',
+            'inbox' => 'https://remote.test/default/inbox',
+        ];
+        $env['store']->writeActor($remote);
+        (new InstanceSettings($env['store'], $env['config']))->addDefaultFollowingActor((string)$remote['id']);
+
+        $users->create('bea', 'Bea');
+        $router = new Router(
+            $env['config'],
+            $env['store'],
+            new ObjectRepository($env['store']),
+            new Renderer(new ObjectRepository($env['store']), $env['config']),
+            $users,
+        );
+        $method = new \ReflectionMethod($router, 'applyDefaultFollowingToUser');
+        $result = $method->invoke($router, 'bea');
+        $graph = new SocialGraph($env['store']);
+
+        $this->check('new user follows configured default remote actor', $graph->isFollowing('bea', (string)$remote['id']));
+        $this->check('default remote follow queues one activity', count($this->deliverJobs($env['queue'])) === 1);
+        $this->check('default remote follow reports addition', ($result['followed'] ?? 0) === 1);
     }
 
     private function scenarioUserArchive(int $iteration): void

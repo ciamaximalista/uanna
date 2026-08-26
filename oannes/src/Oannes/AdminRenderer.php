@@ -48,7 +48,7 @@ final class AdminRenderer
             . '</form></section>');
     }
 
-    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockedActors, array $blockNotices, ?string $message = null, ?string $error = null, string $openBox = '', array $appBuild = [], array $languages = []): string
+    public function instanceAdmin(string $currentUid, array $users, array $settings, array $blockedServers, array $blockedActors, array $blockNotices, array $defaultFollowingActors = [], ?string $message = null, ?string $error = null, string $openBox = '', array $appBuild = [], array $languages = []): string
     {
         $csrf = Html::escape($this->auth->csrfToken());
         $messageHtml = $message !== null ? '<p class="notice">' . Html::escape($message) . '</p>' : '';
@@ -172,6 +172,27 @@ final class AdminRenderer
             . '<p class="meta">' . Html::escape($this->t('admin.socialize_help', 'El usuario indicado pasará a estar en los seguidos de todos los usuarios locales. Si es externo se enviará un Follow federado por cada cuenta local.')) . '</p>'
             . '<button type="submit">' . Html::escape($this->t('admin.socialize_user', 'Socializar usuario')) . '</button>'
             . '</form>';
+        $defaultFollowingHtml = '<form method="post" action="?route=instance-admin/default-following" class="instance-form">'
+            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+            . '<input type="hidden" name="action" value="add"/>'
+            . '<label>' . Html::escape($this->t('admin.default_following_actor', 'Perfil externo seguido por defecto')) . ' <input name="actor_query" placeholder="maximalismo@maximalismo.blog" required/></label>'
+            . '<p class="meta">' . Html::escape($this->t('admin.default_following_help', 'Cada nuevo usuario creado desde ahora seguirá automáticamente estos perfiles externos. No modifica los usuarios ya existentes.')) . '</p>'
+            . '<button type="submit">' . Html::escape($this->t('admin.add_default_following', 'Agregar a seguidos por defecto')) . '</button>'
+            . '</form>';
+        if ($defaultFollowingActors === []) {
+            $defaultFollowingHtml .= '<p class="muted">' . Html::escape($this->t('admin.no_default_following', 'No hay perfiles externos por defecto.')) . '</p>';
+        } else {
+            $defaultFollowingHtml .= '<div class="actor-list">';
+            foreach ($defaultFollowingActors as $actor) {
+                $defaultFollowingHtml .= '<article class="actor-row"><span>' . $this->actorLink((string)$actor) . '</span>'
+                    . '<form method="post" action="?route=instance-admin/default-following" class="actor-actions">'
+                    . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+                    . '<input type="hidden" name="actor" value="' . Html::escape((string)$actor) . '"/>'
+                    . '<button type="submit" name="action" value="delete">' . Html::escape($this->t('admin.remove_default_following', 'Quitar')) . '</button>'
+                    . '</form></article>';
+            }
+            $defaultFollowingHtml .= '</div>';
+        }
         $socialGraphHtml = '<form method="post" action="?route=instance-admin/social-graph" class="instance-form">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<p class="meta">' . Html::escape($this->t('admin.social_graph_help', 'Genera un PNG estático con el grafo social local de la instancia. Después aparecerá enlazado en el panel de todos los usuarios.')) . '</p>'
@@ -218,7 +239,7 @@ final class AdminRenderer
             . $this->panelBox($this->t('admin.create_users', 'Crear usuarios'), $createUsersHtml)
             . $this->panelBox($this->t('admin.edit_users', 'Editar usuarios'), $editUsersHtml)
             . $this->panelBox($this->t('admin.import_user', 'Importar usuario'), $importUsersHtml)
-            . $this->panelBox($this->t('admin.socialize_user', 'Socializar usuario'), $socializeHtml)
+            . $this->panelBox($this->t('admin.socialize_user', 'Socializar usuario'), $socializeHtml . $defaultFollowingHtml)
             . $this->panelBox($this->t('admin.generate_social_graph', 'Generar grafo social'), $socialGraphHtml, $openBox === 'social-graph')
             . $this->panelBox($this->t('admin.compile_app', 'Compilar app'), $appHtml, $openBox === 'app'));
     }

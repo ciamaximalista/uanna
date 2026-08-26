@@ -226,6 +226,11 @@ final class Router
             return;
         }
 
+        if ($route === 'instance-admin/default-following') {
+            $this->instanceAdminDefaultFollowing($method);
+            return;
+        }
+
         if ($route === 'instance-admin/compile-app') {
             $this->instanceAdminCompileApp($method);
             return;
@@ -855,6 +860,7 @@ final class Router
             $settings->blockedServers(),
             $settings->blockedActors(),
             $settings->blockNotices(),
+            $settings->defaultFollowingActors(),
             $message,
             $error,
             $openBox,
@@ -1029,6 +1035,7 @@ final class Router
                 $name = is_string($_POST['name'] ?? null) ? $_POST['name'] : '';
                 $this->users->create($uid, $name, isset($_POST['admin']));
                 $auth->setPassword($uid, $password);
+                $this->applyDefaultFollowingToUser($uid);
             } elseif ($action === 'password') {
                 if ($password === '') {
                     throw new \RuntimeException('Indica una nueva clave.');
@@ -1112,6 +1119,45 @@ final class Router
         }
 
         $this->instanceAdmin('Usuario socializado: ' . (string)($result['followed'] ?? 0) . ' cuentas lo siguen; ' . (string)($result['already'] ?? 0) . ' ya lo seguían.');
+    }
+
+    private function instanceAdminDefaultFollowing(string $method): void
+    {
+        [, $auth] = $this->requireInstanceAdmin();
+        if ($method !== 'POST' || !$auth->checkCsrf(is_string($_POST['csrf'] ?? null) ? $_POST['csrf'] : null)) {
+            $this->instanceAdmin(null, 'Solicitud no válida.');
+            return;
+        }
+
+        try {
+            $settings = new InstanceSettings($this->store, $this->config);
+            $action = is_string($_POST['action'] ?? null) ? $_POST['action'] : '';
+
+            if ($action === 'add') {
+                $query = is_string($_POST['actor_query'] ?? null) ? trim($_POST['actor_query']) : '';
+                if ($query === '') {
+                    throw new \RuntimeException('Indica un perfil externo.');
+                }
+
+                $actor = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($query);
+                $actorId = ActivityPub::objectId($actor);
+                if ($actorId === null || $this->isLocalActorId($actorId)) {
+                    throw new \RuntimeException('Indica un perfil externo válido.');
+                }
+
+                $settings->addDefaultFollowingActor($actorId);
+            } elseif ($action === 'delete') {
+                $actor = is_string($_POST['actor'] ?? null) ? trim($_POST['actor']) : '';
+                $settings->removeDefaultFollowingActor($actor);
+            } else {
+                throw new \RuntimeException('Acción no válida.');
+            }
+        } catch (\Throwable $e) {
+            $this->instanceAdmin(null, $e->getMessage());
+            return;
+        }
+
+        $this->instanceAdmin('Seguidos por defecto actualizados.');
     }
 
     private function instanceAdminCompileApp(string $method): void
@@ -2352,6 +2398,43 @@ final class Router
         foreach ($this->users->all() as $uid => $_user) {
             $uid = (string)$uid;
             if ($localTargetUid !== null && $uid === $localTargetUid) {
+                $skipped++;
+                continue;
+            }
+
+            if ($graph->isFollowing($uid, $actorId)) {
+                $already++;
+                continue;
+            }
+
+            $this->followActor($uid, $actorId, $graph);
+            $followed++;
+        }
+
+        return [
+            'followed' => $followed,
+            'already' => $already,
+            'skipped' => $skipped,
+        ];
+    }
+
+    private function applyDefaultFollowingToUser(string $uid): array
+    {
+        if ($this->users->find($uid) === null) {
+            return [
+                'followed' => 0,
+                'already' => 0,
+                'skipped' => 0,
+            ];
+        }
+
+        $graph = new SocialGraph($this->store);
+        $followed = 0;
+        $already = 0;
+        $skipped = 0;
+
+        foreach ((new InstanceSettings($this->store, $this->config))->defaultFollowingActors() as $actorId) {
+            if ($this->isLocalActorId($actorId)) {
                 $skipped++;
                 continue;
             }
