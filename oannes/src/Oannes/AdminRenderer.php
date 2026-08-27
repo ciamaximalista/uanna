@@ -767,7 +767,7 @@ final class AdminRenderer
             $actorId = is_string($actor['id'] ?? null) ? $actor['id'] : '';
             $resolved = $actorId !== '' ? $this->renderer->actorInfo($actorId) : [];
             $name = (string)($resolved['label'] ?? $actor['name'] ?? $actor['preferredUsername'] ?? $actor['id'] ?? 'Actor');
-            $id = (string)($resolved['url'] ?? $actor['url'] ?? $actor['id'] ?? '#');
+            $id = (string)($resolved['internal_url'] ?? $resolved['url'] ?? $actor['url'] ?? $actor['id'] ?? '#');
             $avatar = (string)($resolved['avatar'] ?? '');
             $state = is_array($socialStates[$actorId] ?? null) ? $socialStates[$actorId] : [];
             $isFollowing = (bool)($state['following'] ?? false);
