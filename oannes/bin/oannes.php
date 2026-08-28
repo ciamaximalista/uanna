@@ -88,19 +88,58 @@ function queue_run(FileStore $store, array $config, ?string $limitArg, ?string $
     $limit = $limitArg !== null && $limitArg !== '' ? (int)$limitArg : 25;
     $dryRun = $mode === '--dry-run' || !(bool)($config['delivery_enabled'] ?? false);
 
-    return (new DeliveryWorker(
+    return run_locked($store, 'queue-run', static fn (): array => (new DeliveryWorker(
         $store,
         new FileQueue($store),
         new KeyStore($store),
         $config,
-    ))->run(max(1, $limit), $dryRun);
+    ))->run(max(1, $limit), $dryRun));
 }
 
 function inbox_run(FileStore $store, ?string $limitArg): array
 {
     $limit = $limitArg !== null && $limitArg !== '' ? (int)$limitArg : 25;
 
-    return (new InboxWorker($store, new FileQueue($store)))->run(max(1, $limit));
+    return run_locked($store, 'inbox-run', static fn (): array => (new InboxWorker($store, new FileQueue($store)))->run(max(1, $limit)));
+}
+
+function run_locked(FileStore $store, string $name, callable $callback): array
+{
+    $dir = $store->dataDir() . '/locks';
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        return [
+            'locked' => false,
+            'skipped' => true,
+            'error' => 'No se pudo preparar el bloqueo de ejecucion.',
+        ];
+    }
+
+    @chmod($dir, 02775);
+    $lock = fopen($dir . '/' . $name . '.lock', 'c');
+    if ($lock === false) {
+        return [
+            'locked' => false,
+            'skipped' => true,
+            'error' => 'No se pudo abrir el bloqueo de ejecucion.',
+        ];
+    }
+
+    if (!flock($lock, LOCK_EX | LOCK_NB)) {
+        fclose($lock);
+        return [
+            'locked' => true,
+            'skipped' => true,
+        ];
+    }
+
+    try {
+        $result = $callback();
+        $result['locked'] = false;
+        return $result;
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
 }
 
 function backfill_boosts(FileStore $store, array $config, ?string $limitArg): array
