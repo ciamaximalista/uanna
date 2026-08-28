@@ -570,6 +570,41 @@ h3 {
     color: var(--text);
 }
 
+.post-meta-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.copy-post-url {
+    display: inline-grid;
+    place-items: center;
+    width: 1.45rem;
+    height: 1.45rem;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.copy-post-url:hover,
+.copy-post-url:focus-visible {
+    border-color: var(--border);
+    background: var(--surface);
+    color: var(--accent-strong);
+}
+
+.copy-post-url.is-copied {
+    color: var(--accent-strong);
+}
+
+.copy-post-url.has-error {
+    color: var(--danger);
+}
+
 .boost-marker {
     display: flex;
     align-items: center;

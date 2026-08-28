@@ -378,7 +378,23 @@ final class InboxWorker
         }
 
         $objectId = ActivityPub::objectId($object);
-        if ($objectId === null || !in_array(ActivityPub::objectType($object), ['Note', 'Article', 'Page', 'Question'], true)) {
+        if ($objectId === null) {
+            return false;
+        }
+
+        if (ActivityPub::isActor($object)) {
+            if ($objectId !== $actorId) {
+                return false;
+            }
+
+            $existing = (new ActorRepository($this->store))->findById($actorId);
+            $actor = is_array($existing) ? array_replace($existing, $object) : $object;
+            $this->store->writeActor($actor);
+            (new SocialGraph($this->store))->updateActorCopies($actor);
+            return true;
+        }
+
+        if (!in_array(ActivityPub::objectType($object), ['Note', 'Article', 'Page', 'Question'], true)) {
             return false;
         }
 

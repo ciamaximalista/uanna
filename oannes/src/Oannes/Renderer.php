@@ -931,6 +931,7 @@ final class Renderer
         $ownActions = $this->ownPostActions($object, $actions);
         $actionHtml = $this->actionBar($id, $interactionActors, $actions, $ownActions);
         $visibilityBadge = $this->visibilityBadge($object);
+        $copyUrlHtml = $url !== '' ? $this->copyPostUrlButton($url) : '';
 
         $boostHtml = $boostedAt !== '' ? $this->boostMarker($boostedBy, $boostedAt, $boostedHuman) : '';
 
@@ -938,12 +939,23 @@ final class Renderer
             . $boostHtml
             . '<header class="object-head">' . $avatarHtml . '<div>'
             . '<p class="meta post-meta">' . $actorNameHtml . '<br/>'
-            . '<a href="' . Html::escape($url) . '"><time datetime="' . Html::escape($published) . '">' . Html::escape($publishedHuman) . '</time></a>' . $visibilityBadge . '</p></div></header>'
+            . '<span class="post-meta-line"><a href="' . Html::escape($url) . '"><time datetime="' . Html::escape($published) . '">' . Html::escape($publishedHuman) . '</time></a>' . $copyUrlHtml . $visibilityBadge . '</span></p></div></header>'
             . '<div class="content">' . $content . '</div>'
             . $attachments
             . $actionHtml
             . $childrenHtml
             . '</article>';
+    }
+
+    private function copyPostUrlButton(string $url): string
+    {
+        $label = Html::escape($this->t('actions.copy_post_url', 'Copiar URL del post'));
+
+        return '<button type="button" class="copy-post-url" data-copy-url="' . Html::escape($url) . '" title="' . $label . '" aria-label="' . $label . '">'
+            . '<svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            . '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>'
+            . '</svg>'
+            . '</button>';
     }
 
     private function attachmentHtml(array $object): string
@@ -1579,10 +1591,7 @@ final class Renderer
         $avatar = '';
 
         if (is_array($actor)) {
-            $icon = $actor['icon'] ?? null;
-            if (is_array($icon) && is_string($icon['url'] ?? null)) {
-                $avatar = $icon['url'];
-            }
+            $avatar = $this->actorIconUrl($actor, $actorId);
         }
 
         return $this->actorInfoCache[$actorId] = [
@@ -1622,6 +1631,83 @@ final class Renderer
         }
 
         return $actorId !== '' ? $actorId : '#';
+    }
+
+    private function actorIconUrl(array $actor, string $actorId): string
+    {
+        $icons = $actor['icon'] ?? null;
+        if (is_array($icons) && !isset($icons['url'])) {
+            foreach ($icons as $icon) {
+                if (is_array($icon)) {
+                    $url = $this->absoluteActorUrl($this->actorUrlValue($icon['url'] ?? $icon['href'] ?? null), $actorId);
+                    if ($url !== '') {
+                        return $url;
+                    }
+                }
+            }
+
+            return '';
+        }
+
+        if (is_array($icons)) {
+            return $this->absoluteActorUrl($this->actorUrlValue($icons['url'] ?? $icons['href'] ?? null), $actorId);
+        }
+
+        return '';
+    }
+
+    private function actorUrlValue(mixed $value): string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (!is_array($value)) {
+            return '';
+        }
+
+        if (is_string($value['href'] ?? null)) {
+            return $value['href'];
+        }
+
+        foreach ($value as $item) {
+            $url = $this->actorUrlValue($item);
+            if ($url !== '') {
+                return $url;
+            }
+        }
+
+        return '';
+    }
+
+    private function absoluteActorUrl(string $url, string $actorId): string
+    {
+        $url = trim($url);
+        if ($url === '' || str_starts_with($url, 'data:')) {
+            return $url;
+        }
+
+        if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
+            return $url;
+        }
+
+        $scheme = parse_url($actorId, PHP_URL_SCHEME);
+        $host = parse_url($actorId, PHP_URL_HOST);
+        if (!is_string($scheme) || !is_string($host) || $scheme === '' || $host === '') {
+            return $url;
+        }
+
+        if (str_starts_with($url, '//')) {
+            return $scheme . ':' . $url;
+        }
+
+        if (str_starts_with($url, '/')) {
+            return $scheme . '://' . $host . $url;
+        }
+
+        $path = parse_url($actorId, PHP_URL_PATH);
+        $base = is_string($path) && $path !== '' ? rtrim(dirname($path), '/') : '';
+        return $scheme . '://' . $host . ($base !== '' ? $base : '') . '/' . $url;
     }
 
     private function actorHandle(array $actor, string $actorId): string

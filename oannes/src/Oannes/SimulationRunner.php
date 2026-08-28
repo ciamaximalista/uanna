@@ -25,6 +25,7 @@ final class SimulationRunner
             $this->scenarioDefaultFollowingForNewUser($i);
             $this->scenarioUserArchive($i);
             $this->scenarioInboxSecurity($i);
+            $this->scenarioRemoteActorUpdateRefreshesAvatar($i);
             $this->scenarioNegativeInputs($i);
             $this->scenarioDeliveryDryRun($i);
             $this->scenarioDeliveryDeduplication($i);
@@ -178,6 +179,44 @@ final class SimulationRunner
         } catch (\Throwable $e) {
             $this->check('wrong keyId rejected', $e->getMessage() === 'HTTP Signature key does not match activity actor');
         }
+    }
+
+    private function scenarioRemoteActorUpdateRefreshesAvatar(int $iteration): void
+    {
+        $env = $this->environment('actor-update-' . $iteration);
+        $old = $env['remote'];
+        $old['icon'] = [
+            'type' => 'Image',
+            'url' => 'https://remote.test/media/old.png',
+        ];
+        $env['store']->writeActor($old);
+
+        $update = [
+            'id' => 'https://remote.test/a/actor-update-' . $iteration,
+            'type' => 'Update',
+            'actor' => $env['remote_actor'],
+            'object' => [
+                'id' => $env['remote_actor'],
+                'type' => 'Person',
+                'preferredUsername' => 'alex',
+                'icon' => [
+                    'type' => 'Image',
+                    'url' => [
+                        [
+                            'href' => '/media/new.png',
+                        ],
+                    ],
+                ],
+            ],
+        ];
+        $this->receive($env, $update);
+        (new InboxWorker($env['store'], $env['queue']))->run();
+
+        $actor = (new ActorRepository($env['store']))->findById($env['remote_actor']);
+        $info = (new Renderer(new ObjectRepository($env['store']), $env['config']))->actorInfo($env['remote_actor']);
+
+        $this->check('remote actor update stores new icon', is_array($actor) && is_array($actor['icon']['url'] ?? null));
+        $this->check('remote actor relative icon resolves against actor host', ($info['avatar'] ?? null) === 'https://remote.test/media/new.png');
     }
 
     private function scenarioDeliveryDryRun(int $iteration): void

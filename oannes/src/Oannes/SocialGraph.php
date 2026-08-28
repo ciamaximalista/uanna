@@ -67,6 +67,34 @@ final class SocialGraph
         }
     }
 
+    public function updateActorCopies(array $actor): int
+    {
+        $id = ActivityPub::objectId($actor);
+        if ($id === null) {
+            return 0;
+        }
+
+        $aliases = array_fill_keys(ActivityPub::aliases($actor), true);
+        $updated = 0;
+
+        foreach (glob($this->store->dataDir() . '/social/*/{followers,following}/*.json', GLOB_BRACE) ?: [] as $file) {
+            try {
+                $existing = $this->store->readJson($file);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if (array_intersect_key(array_fill_keys(ActivityPub::aliases($existing), true), $aliases) === []) {
+                continue;
+            }
+
+            $this->store->writeJson($file, array_replace($existing, $actor));
+            $updated++;
+        }
+
+        return $updated;
+    }
+
     public function followers(string $uid): array
     {
         return $this->readActors('followers', $uid);

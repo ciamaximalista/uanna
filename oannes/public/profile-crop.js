@@ -256,6 +256,65 @@
         }
     }
 
+    function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text);
+        }
+
+        return new Promise(function (resolve, reject) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            textarea.style.top = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            try {
+                if (document.execCommand('copy')) {
+                    resolve();
+                } else {
+                    reject(new Error('copy'));
+                }
+            } catch (error) {
+                reject(error);
+            } finally {
+                textarea.remove();
+            }
+        });
+    }
+
+    function handleCopyPostUrl(event) {
+        const button = event.target.closest('.copy-post-url');
+        if (!button) {
+            return false;
+        }
+
+        event.preventDefault();
+        const rawUrl = button.dataset.copyUrl || '';
+        if (rawUrl === '') {
+            return true;
+        }
+
+        const url = new URL(rawUrl, window.location.href).href;
+        copyText(url)
+            .then(function () {
+                button.classList.add('is-copied');
+                window.setTimeout(function () {
+                    button.classList.remove('is-copied');
+                }, 1200);
+            })
+            .catch(function () {
+                button.classList.add('has-error');
+                window.setTimeout(function () {
+                    button.classList.remove('has-error');
+                }, 1200);
+            });
+
+        return true;
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.image-cropper').forEach(initCropper);
         document.querySelectorAll('input[type="file"]').forEach(updatePostImageInput);
@@ -271,6 +330,10 @@
             }
         });
         document.addEventListener('click', function (event) {
+            if (handleCopyPostUrl(event)) {
+                return;
+            }
+
             const button = event.target.closest('.timeline-more button');
             if (!button) {
                 return;
