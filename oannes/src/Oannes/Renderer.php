@@ -1114,17 +1114,23 @@ final class Renderer
 
     private function visibilityBadge(array $object): string
     {
-        if (ActivityPub::isPublicObject($object)) {
+        $audience = ActivityPub::audience($object);
+
+        if (in_array(ActivityPub::PUBLIC_AUDIENCE, $audience, true)) {
             return '';
         }
 
-        foreach (ActivityPub::audience($object) as $target) {
-            if (str_ends_with($target, '/followers')) {
-                return '<span class="visibility-badge followers">' . Html::escape($this->t('visibility.followers_only', 'Sólo para seguidores')) . '</span>';
+        foreach ($audience as $target) {
+            if (is_string($target) && str_ends_with($target, '/followers')) {
+                return '<span class="visibility-badge followers" title="' . Html::escape($this->t('visibility.followers_reserved', 'Reservado a seguidores')) . '">'
+                    . Html::escape($this->t('visibility.followers_reserved', 'Reservado a seguidores'))
+                    . '</span>';
             }
         }
 
-        return '<span class="visibility-badge private">' . Html::escape($this->t('visibility.private', 'Privado')) . '</span>';
+        return '<span class="visibility-badge private" title="' . Html::escape($this->t('visibility.private', 'Privado')) . '">'
+            . Html::escape($this->t('visibility.private', 'Privado'))
+            . '</span>';
     }
 
     private function actionBar(string $id, array $interactionActors, ?array $actions, string $ownActions = ''): string

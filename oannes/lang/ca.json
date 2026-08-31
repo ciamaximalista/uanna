@@ -177,6 +177,7 @@
     "timeline.empty_following": "Encara no hi ha publicacions importades dels comptes que segueixes.",
     "timeline.empty_public": "Encara no hi ha publicacions públiques.",
     "visibility.followers_only": "Només per a seguidors",
+    "visibility.followers_reserved": "Reservat a seguidors",
     "visibility.private": "Privat",
     "visibility.public": "Pública"
   }

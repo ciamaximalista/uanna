@@ -177,6 +177,7 @@
     "timeline.empty_following": "There are no imported posts from the accounts you follow yet.",
     "timeline.empty_public": "There are no public posts yet.",
     "visibility.followers_only": "Followers only",
+    "visibility.followers_reserved": "Followers only",
     "visibility.private": "Private",
     "visibility.public": "Public"
   }

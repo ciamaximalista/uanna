@@ -356,6 +356,8 @@ final class SimulationRunner
             'published' => gmdate('c'),
             'to' => [ActivityPub::PUBLIC_AUDIENCE],
             'url' => 'https://remote.test/posts/canonical-' . $iteration,
+            'context' => 'https://nammu.test/ap/objects/root-' . $iteration,
+            'conversation' => 'https://nammu.test/ap/objects/root-' . $iteration,
             'content' => 'Canonical parent',
         ];
         $announce = [
@@ -379,6 +381,8 @@ final class SimulationRunner
 
         $this->check('reply human URL canonicalized to object id', ($fromHumanUrl['inReplyTo'] ?? null) === $remote['id']);
         $this->check('reply Announce canonicalized to announced object id', ($fromAnnounce['inReplyTo'] ?? null) === $remote['id']);
+        $this->check('reply preserves thread context', ($fromHumanUrl['context'] ?? null) === $remote['context']);
+        $this->check('reply preserves thread conversation', ($fromHumanUrl['conversation'] ?? null) === $remote['conversation']);
     }
 
     private function scenarioLocalUserAutoFollow(int $iteration): void

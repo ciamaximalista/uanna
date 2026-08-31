@@ -177,6 +177,7 @@
     "timeline.empty_following": "Ainda não há publicações importadas das contas que segues.",
     "timeline.empty_public": "Ainda não há publicações públicas.",
     "visibility.followers_only": "Só para seguidores",
+    "visibility.followers_reserved": "Reservado a seguidores",
     "visibility.private": "Privado",
     "visibility.public": "Pública"
   }

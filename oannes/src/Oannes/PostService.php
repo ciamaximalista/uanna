@@ -33,6 +33,7 @@ final class PostService
         $followers = $actorId . '/followers';
         $visibility = $options['visibility'] ?? 'public';
         $inReplyTo = $this->canonicalReplyTarget($options['inReplyTo'] ?? null);
+        $replyContext = $this->replyContext($inReplyTo);
         $directTo = $options['to'] ?? null;
         $attachments = is_array($options['attachments'] ?? null) ? $options['attachments'] : [];
         $mentions = $this->mentionsForContent($content, $uid);
@@ -99,6 +100,10 @@ final class PostService
 
         if (is_string($inReplyTo) && $inReplyTo !== '') {
             $note['inReplyTo'] = $inReplyTo;
+        }
+
+        foreach ($replyContext as $field => $value) {
+            $note[$field] = $value;
         }
 
         $this->store->writeObject($note);
@@ -630,6 +635,80 @@ final class PostService
         }
 
         return $id ?? $inReplyTo;
+    }
+
+    private function replyContext(?string $inReplyTo): array
+    {
+        if ($inReplyTo === null || $inReplyTo === '') {
+            return [];
+        }
+
+        $repo = new ObjectRepository($this->store);
+        $parent = $repo->findByIdOrAlias($inReplyTo);
+        if ($parent === null) {
+            return [];
+        }
+
+        $context = $this->stringField($parent, 'context');
+        $conversation = $this->stringField($parent, 'conversation');
+        $root = $this->threadRoot($repo, $parent);
+        $rootId = ActivityPub::objectId($root);
+
+        if ($context === '' && $conversation !== '') {
+            $context = $conversation;
+        }
+
+        if ($conversation === '' && $context !== '') {
+            $conversation = $context;
+        }
+
+        if ($context === '' && $rootId !== null) {
+            $context = $rootId;
+        }
+
+        if ($conversation === '' && $rootId !== null) {
+            $conversation = $rootId;
+        }
+
+        $values = [];
+        if ($context !== '') {
+            $values['context'] = $context;
+        }
+
+        if ($conversation !== '') {
+            $values['conversation'] = $conversation;
+        }
+
+        return $values;
+    }
+
+    private function stringField(array $object, string $field): string
+    {
+        $value = $object[$field] ?? null;
+        return is_string($value) && $value !== '' ? $value : '';
+    }
+
+    private function threadRoot(ObjectRepository $repo, array $object): array
+    {
+        $root = $object;
+        $seen = [];
+
+        for ($depth = 0; $depth < 8; $depth++) {
+            $parentId = ActivityPub::inReplyTo($root);
+            if ($parentId === null || isset($seen[$parentId])) {
+                break;
+            }
+
+            $seen[$parentId] = true;
+            $parent = $repo->findByIdOrAlias($parentId);
+            if ($parent === null) {
+                break;
+            }
+
+            $root = $parent;
+        }
+
+        return $root;
     }
 
     private function announcedObjectId(array $object, ObjectRepository $repo): ?string

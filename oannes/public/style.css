@@ -685,6 +685,12 @@ h3 {
     color: #7a5512;
 }
 
+.visibility-badge.followers {
+    border-color: #8db7a3;
+    background: #e9f8f1;
+    color: #24634a;
+}
+
 .post-attachments {
     display: grid;
     gap: 0.75rem;

@@ -177,6 +177,7 @@
     "timeline.empty_following": "Oraindik ez dago jarraitzen dituzun kontuetatik inportatutako argitalpenik.",
     "timeline.empty_public": "Oraindik ez dago argitalpen publikorik.",
     "visibility.followers_only": "Jarraitzaileentzat soilik",
+    "visibility.followers_reserved": "Jarraitzaileentzat erreserbatua",
     "visibility.private": "Pribatua",
     "visibility.public": "Publikoa"
   }
