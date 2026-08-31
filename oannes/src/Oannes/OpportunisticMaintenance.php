@@ -59,7 +59,7 @@ final class OpportunisticMaintenance
         try {
             $inboxLimit = max(0, min(50, (int)($this->config['opportunistic_inbox_limit'] ?? 5)));
             if ($inboxLimit > 0 && (bool)($this->config['inbox_enabled'] ?? false)) {
-                $stats['inbox'] = (new InboxWorker($this->store, new FileQueue($this->store)))->run($inboxLimit);
+                $stats['inbox'] = (new InboxWorker($this->store, new FileQueue($this->store), $this->config))->run($inboxLimit);
             }
 
             $deliveryLimit = max(0, min(25, (int)($this->config['opportunistic_delivery_limit'] ?? 2)));

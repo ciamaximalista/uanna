@@ -2933,19 +2933,94 @@ final class Router
         $fetchLimit = max($limit, $offset + $limit);
         $objects = array_merge(
             $this->repo->byAnyActor(array_values(array_unique($actorIds)), $fetchLimit),
-            $interactions->remoteBoostedObjectsForUser($uid, $followedActorIds, $fetchLimit)
+            $interactions->remoteBoostedObjectsForUser($uid, $followedActorIds, $fetchLimit),
+            $this->notificationTimelineObjects($uid, $fetchLimit)
         );
         $objects = array_values(array_filter(
             $objects,
             fn (array $object): bool => $this->objectVisibleInUserTimeline($uid, $object)
         ));
+        $objects = $this->uniqueTimelineObjects($objects);
 
-        usort($objects, static fn (array $a, array $b): int => strcmp(
-            (string)($b['_oannes_boosted_at'] ?? ActivityPub::published($b)),
-            (string)($a['_oannes_boosted_at'] ?? ActivityPub::published($a))
+        usort($objects, fn (array $a, array $b): int => strcmp(
+            $this->timelineSortDate($b),
+            $this->timelineSortDate($a)
         ));
 
         return array_slice($objects, $offset, $limit);
+    }
+
+    private function notificationTimelineObjects(string $uid, int $limit): array
+    {
+        $items = [];
+
+        foreach (glob($this->store->dataDir() . '/users/' . rawurlencode($uid) . '/notify/*.json') ?: [] as $file) {
+            try {
+                $record = Json::decodeFile($file);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            $type = (string)($record['type'] ?? '');
+            if (!in_array($type, ['Create', 'Mention', 'Webmention'], true)) {
+                continue;
+            }
+
+            $objid = (string)($record['objid'] ?? '');
+            if ($objid === '') {
+                continue;
+            }
+
+            $object = $this->repo->findByIdOrAlias($objid);
+            if ($object === null) {
+                continue;
+            }
+
+            $date = (string)($record['date'] ?? '');
+            if ($date !== '') {
+                $object['_oannes_notified_at'] = $date;
+            }
+
+            $items[] = $object;
+        }
+
+        usort($items, fn (array $a, array $b): int => strcmp(
+            $this->timelineSortDate($b),
+            $this->timelineSortDate($a)
+        ));
+
+        return array_slice($items, 0, $limit);
+    }
+
+    private function uniqueTimelineObjects(array $objects): array
+    {
+        $unique = [];
+
+        foreach ($objects as $object) {
+            $id = ActivityPub::objectId($object);
+            if ($id === null) {
+                continue;
+            }
+
+            $existing = $unique[$id] ?? null;
+            if (!is_array($existing) || $this->timelineSortDate($object) > $this->timelineSortDate($existing)) {
+                $unique[$id] = $object;
+            }
+        }
+
+        return array_values($unique);
+    }
+
+    private function timelineSortDate(array $object): string
+    {
+        foreach (['_oannes_boosted_at', '_oannes_notified_at', '_oannes_thread_activity_at'] as $key) {
+            $value = $object[$key] ?? null;
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return ActivityPub::published($object);
     }
 
     private function refreshTimelineInbox(): void
@@ -2962,7 +3037,7 @@ final class Router
 
         try {
             $limit = max(1, min(50, (int)($this->config['timeline_refresh_inbox_limit'] ?? 10)));
-            (new InboxWorker($this->store, new FileQueue($this->store)))->run($limit);
+            (new InboxWorker($this->store, new FileQueue($this->store), $this->config))->run($limit);
         } catch (\Throwable) {
             // Timeline rendering must not fail because one remote activity is malformed.
         }

@@ -39,7 +39,7 @@ try {
         'validate-threads' => (new ThreadValidator($store))->validate(),
         'queue-list' => (new FileQueue($store))->list($argv[2] ?? 'pending'),
         'queue-run' => queue_run($store, $config, $argv[2] ?? null, $argv[3] ?? null),
-        'inbox-run' => inbox_run($store, $argv[2] ?? null),
+        'inbox-run' => inbox_run($store, $config, $argv[2] ?? null),
         'moderation-list' => moderation_list($store, $config, $argv[2] ?? null, $argv[3] ?? null),
         'moderation-approve-follow' => moderation_decide_follow($store, $config, $argv[2] ?? null, $argv[3] ?? null, true),
         'moderation-reject-follow' => moderation_decide_follow($store, $config, $argv[2] ?? null, $argv[3] ?? null, false),
@@ -96,11 +96,11 @@ function queue_run(FileStore $store, array $config, ?string $limitArg, ?string $
     ))->run(max(1, $limit), $dryRun));
 }
 
-function inbox_run(FileStore $store, ?string $limitArg): array
+function inbox_run(FileStore $store, array $config, ?string $limitArg): array
 {
     $limit = $limitArg !== null && $limitArg !== '' ? (int)$limitArg : 25;
 
-    return run_locked($store, 'inbox-run', static fn (): array => (new InboxWorker($store, new FileQueue($store)))->run(max(1, $limit)));
+    return run_locked($store, 'inbox-run', static fn (): array => (new InboxWorker($store, new FileQueue($store), $config))->run(max(1, $limit)));
 }
 
 function run_locked(FileStore $store, string $name, callable $callback): array

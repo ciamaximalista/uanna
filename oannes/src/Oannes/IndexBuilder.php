@@ -29,6 +29,7 @@ final class IndexBuilder
                 'type' => ActivityPub::objectType($object),
                 'path' => $this->relativePath($file),
                 'published' => ActivityPub::published($object),
+                'sort_date' => $this->sortDate($object),
                 'actor' => ActivityPub::attributedTo($object),
                 'inReplyTo' => ActivityPub::inReplyTo($object),
             ];
@@ -62,8 +63,8 @@ final class IndexBuilder
         foreach ([$children, $byActor, $orphans] as &$bucket) {
             foreach ($bucket as &$ids) {
                 usort($ids, fn (string $a, string $b): int => strcmp(
-                    $objects[$a]['published'] ?? '',
-                    $objects[$b]['published'] ?? ''
+                    $objects[$a]['sort_date'] ?? $objects[$a]['published'] ?? '',
+                    $objects[$b]['sort_date'] ?? $objects[$b]['published'] ?? ''
                 ));
             }
         }
@@ -103,5 +104,17 @@ final class IndexBuilder
     {
         $root = rtrim($this->store->dataDir(), '/') . '/';
         return str_starts_with($path, $root) ? substr($path, strlen($root)) : $path;
+    }
+
+    private function sortDate(array $object): string
+    {
+        foreach (['_oannes_boosted_at', '_oannes_thread_activity_at', '_oannes_notified_at'] as $key) {
+            $value = $object[$key] ?? null;
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return ActivityPub::published($object);
     }
 }

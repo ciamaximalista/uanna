@@ -892,8 +892,14 @@ final class Renderer
 
     private function timelineSortDate(array $object): string
     {
-        $boostedAt = $object['_oannes_boosted_at'] ?? null;
-        return is_string($boostedAt) && $boostedAt !== '' ? $boostedAt : ActivityPub::published($object);
+        foreach (['_oannes_boosted_at', '_oannes_notified_at', '_oannes_thread_activity_at'] as $key) {
+            $value = $object[$key] ?? null;
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return ActivityPub::published($object);
     }
 
     private function objectCard(array $object, bool $child, array $options = []): string

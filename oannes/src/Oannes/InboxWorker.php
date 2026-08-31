@@ -9,6 +9,7 @@ final class InboxWorker
     public function __construct(
         private readonly FileStore $store,
         private readonly FileQueue $queue,
+        private readonly array $config = [],
     ) {
     }
 
@@ -252,9 +253,88 @@ final class InboxWorker
         }
 
         $this->storeAcceptedObject($localUid, $object);
+        $this->bumpLocalReplyThread($localUid, $object);
         $this->notifyAcceptedCreate($localUid, $activity, $object);
 
         return true;
+    }
+
+    private function bumpLocalReplyThread(string $localUid, array $object): void
+    {
+        $parentId = ActivityPub::inReplyTo($object);
+        if ($parentId === null) {
+            return;
+        }
+
+        $repo = new ObjectRepository($this->store);
+        $parent = $repo->findByIdOrAlias($parentId);
+        if ($parent === null || !$this->isLocalUserObject($localUid, $parent)) {
+            return;
+        }
+
+        $activityAt = ActivityPub::published($object);
+        if ($activityAt === '') {
+            $activityAt = gmdate('c');
+        }
+
+        $this->bumpObjectThreadActivity($parent, $activityAt);
+        $root = $this->threadRoot($repo, $parent);
+        $rootId = ActivityPub::objectId($root);
+        $parentObjectId = ActivityPub::objectId($parent);
+        if ($rootId !== null && $rootId !== $parentObjectId) {
+            $this->bumpObjectThreadActivity($root, $activityAt);
+        }
+
+        (new IndexBuilder($this->store))->rebuild();
+    }
+
+    private function isLocalUserObject(string $localUid, array $object): bool
+    {
+        if ($this->config === []) {
+            return false;
+        }
+
+        $actor = ActivityPub::attributedTo($object);
+        if ($actor === null) {
+            return false;
+        }
+
+        $users = new LocalUsers($this->store, $this->config);
+        return in_array($actor, array_merge([$users->actorId($localUid)], $users->legacyActorIds($localUid)), true);
+    }
+
+    private function threadRoot(ObjectRepository $repo, array $object): array
+    {
+        $root = $object;
+        $seen = [];
+
+        for ($depth = 0; $depth < 8; $depth++) {
+            $parentId = ActivityPub::inReplyTo($root);
+            if ($parentId === null || isset($seen[$parentId])) {
+                break;
+            }
+
+            $seen[$parentId] = true;
+            $parent = $repo->findByIdOrAlias($parentId);
+            if ($parent === null) {
+                break;
+            }
+
+            $root = $parent;
+        }
+
+        return $root;
+    }
+
+    private function bumpObjectThreadActivity(array $object, string $activityAt): void
+    {
+        $current = $object['_oannes_thread_activity_at'] ?? null;
+        if (is_string($current) && $current >= $activityAt) {
+            return;
+        }
+
+        $object['_oannes_thread_activity_at'] = $activityAt;
+        $this->store->writeObject($object);
     }
 
     private function storeAcceptedObject(string $localUid, array $object): void

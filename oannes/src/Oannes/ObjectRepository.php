@@ -48,8 +48,8 @@ final class ObjectRepository
     {
         $items = array_values($this->objects());
         usort($items, static fn (array $a, array $b): int => strcmp(
-            (string)($b['published'] ?? ''),
-            (string)($a['published'] ?? '')
+            (string)($b['sort_date'] ?? $b['published'] ?? ''),
+            (string)($a['sort_date'] ?? $a['published'] ?? '')
         ));
 
         $objects = [];
@@ -96,8 +96,8 @@ final class ObjectRepository
         }
 
         usort($metas, static fn (array $a, array $b): int => strcmp(
-            (string)($b['published'] ?? ''),
-            (string)($a['published'] ?? '')
+            (string)($b['sort_date'] ?? $b['published'] ?? ''),
+            (string)($a['sort_date'] ?? $a['published'] ?? '')
         ));
 
         $objects = [];

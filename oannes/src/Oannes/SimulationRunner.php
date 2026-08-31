@@ -16,6 +16,7 @@ final class SimulationRunner
             $this->scenarioFollowApprove($i);
             $this->scenarioFollowReject($i);
             $this->scenarioCreateModeration($i);
+            $this->scenarioNotifiedReplyAppearsAndBumpsLocalThread($i);
             $this->scenarioInteractionAccept($i);
             $this->scenarioRemoteBoostFromFollowed($i);
             $this->scenarioReplyMentionAnnounce($i);
@@ -125,6 +126,62 @@ final class SimulationRunner
         $this->check('create stored by alias', $repo->findByIdOrAlias('https://remote.test/@alex/' . $iteration) !== null);
         $this->check('create child linked by inReplyTo', count($repo->childrenOf((string)$parent['id'])) === 1);
         $this->check('create content URL ignored for parentage', count($repo->childrenOf($linkedButNotParent)) === 0);
+    }
+
+    private function scenarioNotifiedReplyAppearsAndBumpsLocalThread(int $iteration): void
+    {
+        $env = $this->environment('notified-reply-' . $iteration);
+        $store = $env['store'];
+        $repo = new ObjectRepository($store);
+        $oldRoot = [
+            'id' => $env['config']['base_url'] . '/u/ana/p/notified-root-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => $env['config']['base_url'] . '/u/ana',
+            'published' => '2020-01-01T00:00:00Z',
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'Old local root',
+        ];
+        $newerLocal = [
+            'id' => $env['config']['base_url'] . '/u/ana/p/newer-local-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => $env['config']['base_url'] . '/u/ana',
+            'published' => '2025-01-01T00:00:00Z',
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'Newer local post',
+        ];
+
+        $store->writeObject($oldRoot);
+        $store->writeObject($newerLocal);
+        (new IndexBuilder($store))->rebuild();
+
+        $replyId = 'https://remote.test/notes/notified-reply-' . $iteration;
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/notified-reply-' . $iteration,
+            'type' => 'Create',
+            'actor' => $env['remote_actor'],
+            'object' => [
+                'id' => $replyId,
+                'type' => 'Note',
+                'attributedTo' => $env['remote_actor'],
+                'published' => '2026-01-01T00:00:00Z',
+                'to' => [ActivityPub::PUBLIC_AUDIENCE],
+                'content' => 'Reply to local user',
+                'inReplyTo' => $oldRoot['id'],
+            ],
+        ]);
+
+        (new InboxWorker($store, $env['queue'], $env['config']))->run();
+        $repo = new ObjectRepository($store);
+        $storedRoot = $repo->findByIdOrAlias((string)$oldRoot['id']);
+        $byLocalActor = $repo->byActor($env['config']['base_url'] . '/u/ana', 2);
+        $topLocalId = ActivityPub::objectId($byLocalActor[0] ?? []);
+        $privateTimeline = $this->privateTimeline($env, 'ana', 10);
+        $privateIds = array_map(static fn (array $object): ?string => ActivityPub::objectId($object), $privateTimeline);
+
+        $this->check('notified reply stored as child', count($repo->childrenOf((string)$oldRoot['id'])) === 1);
+        $this->check('reply to local user bumps thread date', ($storedRoot['_oannes_thread_activity_at'] ?? null) === '2026-01-01T00:00:00Z');
+        $this->check('bumped local thread sorts before newer local post', $topLocalId === $oldRoot['id']);
+        $this->check('notified reply enters private timeline', in_array($replyId, $privateIds, true));
     }
 
     private function scenarioInboxSecurity(int $iteration): void
@@ -734,6 +791,22 @@ final class SimulationRunner
             new SocialGraph($env['store']),
             $env['queue'],
         );
+    }
+
+    private function privateTimeline(array $env, string $uid, int $limit): array
+    {
+        $repo = new ObjectRepository($env['store']);
+        $router = new Router(
+            $env['config'],
+            $env['store'],
+            $repo,
+            new Renderer($repo, $env['config']),
+            new LocalUsers($env['store'], $env['config'])
+        );
+        $method = new \ReflectionMethod($router, 'privateTimeline');
+        $method->setAccessible(true);
+
+        return $method->invoke($router, $uid, $limit, 0);
     }
 
     private function deliverJobs(FileQueue $queue): array
