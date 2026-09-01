@@ -3070,13 +3070,27 @@ final class Router
             return false;
         }
 
-        if (ActivityPub::isPublicObject($object)) {
+        $actor = ActivityPub::attributedTo($object);
+        if ($actor !== null && $this->isLocalActorId($actor)) {
             return true;
         }
 
-        $receivedBy = $object['_oannes_inbox_uids'] ?? [];
-        if (is_array($receivedBy) && in_array($uid, $receivedBy, true)) {
+        $graph = new SocialGraph($this->store);
+        if ($actor !== null && $graph->isFollowing($uid, $actor)) {
             return true;
+        }
+
+        $boostedBy = $object['_oannes_boosted_by'] ?? null;
+        if (is_string($boostedBy) && $boostedBy !== '' && $graph->isFollowing($uid, $boostedBy)) {
+            return true;
+        }
+
+        if (ActivityPub::isPublicObject($object) && $this->objectBelongsToFollowedThread($uid, $object, $graph)) {
+            return true;
+        }
+
+        if (ActivityPub::isPublicObject($object)) {
+            return false;
         }
 
         $audience = ActivityPub::audience($object);
@@ -3088,7 +3102,36 @@ final class Router
             }
         }
 
-        return ActivityPub::attributedTo($object) === $this->users->actorId($uid);
+        $receivedBy = $object['_oannes_inbox_uids'] ?? [];
+        return is_array($receivedBy) && in_array($uid, $receivedBy, true);
+    }
+
+    private function objectBelongsToFollowedThread(string $uid, array $object, SocialGraph $graph): bool
+    {
+        $seen = [];
+        $current = $object;
+
+        for ($depth = 0; $depth < 8; $depth++) {
+            $parentId = ActivityPub::inReplyTo($current);
+            if ($parentId === null || isset($seen[$parentId])) {
+                return false;
+            }
+
+            $seen[$parentId] = true;
+            $parent = $this->repo->findByIdOrAlias($parentId);
+            if ($parent === null || $this->objectBlocked($parent)) {
+                return false;
+            }
+
+            $parentActor = ActivityPub::attributedTo($parent);
+            if ($parentActor !== null && ($this->isLocalActorId($parentActor) || $graph->isFollowing($uid, $parentActor))) {
+                return true;
+            }
+
+            $current = $parent;
+        }
+
+        return false;
     }
 
     private function objectBlocked(array $object): bool

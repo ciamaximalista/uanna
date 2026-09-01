@@ -152,6 +152,7 @@ final class SimulationRunner
 
         $store->writeObject($oldRoot);
         $store->writeObject($newerLocal);
+        (new SocialGraph($store))->addFollowing('ana', $env['remote']);
         (new IndexBuilder($store))->rebuild();
 
         $replyId = 'https://remote.test/notes/notified-reply-' . $iteration;
@@ -182,6 +183,55 @@ final class SimulationRunner
         $this->check('reply to local user bumps thread date', ($storedRoot['_oannes_thread_activity_at'] ?? null) === '2026-01-01T00:00:00Z');
         $this->check('bumped local thread sorts before newer local post', $topLocalId === $oldRoot['id']);
         $this->check('notified reply enters private timeline', in_array($replyId, $privateIds, true));
+
+        (new SocialGraph($store))->removeFollowing('ana', $env['remote_actor']);
+        $standaloneId = 'https://remote.test/notes/notified-standalone-' . $iteration;
+        $standalone = [
+            'id' => $standaloneId,
+            'type' => 'Note',
+            'attributedTo' => $env['remote_actor'],
+            'published' => '2026-01-01T01:00:00Z',
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'Standalone post from unfollowed actor',
+            '_oannes_inbox_uids' => ['ana'],
+        ];
+        $store->writeObject($standalone);
+        $store->writeJson($store->dataDir() . '/users/ana/notify/' . Id::digest('Create:' . $env['remote_actor'] . ':' . $standaloneId) . '.json', [
+            'type' => 'Create',
+            'actor' => $env['remote_actor'],
+            'objid' => $standaloneId,
+            'date' => '2026-01-01T01:00:00Z',
+        ]);
+        (new IndexBuilder($store))->rebuild();
+        $privateTimelineAfterUnfollow = $this->privateTimeline($env, 'ana', 10);
+        $privateIdsAfterUnfollow = array_map(static fn (array $object): ?string => ActivityPub::objectId($object), $privateTimelineAfterUnfollow);
+        $this->check('unfollowed actor standalone post disappears from private timeline', !in_array($standaloneId, $privateIdsAfterUnfollow, true));
+        $this->check('unfollowed actor reply remains in followed thread', in_array($replyId, $privateIdsAfterUnfollow, true));
+
+        $booster = [
+            'id' => 'https://booster.test/actor-' . $iteration,
+            'type' => 'Person',
+            'preferredUsername' => 'booster',
+            'inbox' => 'https://booster.test/inbox',
+        ];
+        $store->writeActor($booster);
+        (new SocialGraph($store))->addFollowing('ana', $booster);
+        $store->writeJson($store->dataDir() . '/interactions/remote/ana/' . Id::digest($booster['id'] . ':Announce:' . $replyId) . '.json', [
+            'id' => 'https://booster.test/announce-' . $iteration,
+            'type' => 'Announce',
+            'actor' => $booster['id'],
+            'object' => $replyId,
+            'published' => '2026-01-02T00:00:00Z',
+        ]);
+        $privateTimelineAfterBoost = $this->privateTimeline($env, 'ana', 10);
+        $boostedReply = null;
+        foreach ($privateTimelineAfterBoost as $object) {
+            if (ActivityPub::objectId($object) === $replyId) {
+                $boostedReply = $object;
+                break;
+            }
+        }
+        $this->check('unfollowed actor can appear when boosted by followed actor', is_array($boostedReply) && ($boostedReply['_oannes_boosted_by'] ?? null) === $booster['id']);
     }
 
     private function scenarioInboxSecurity(int $iteration): void
