@@ -2845,6 +2845,11 @@ final class Router
                 return;
             }
 
+            if ($path === 'follow') {
+                $this->apiFollow($uid, $method);
+                return;
+            }
+
             if ($path === 'reaction') {
                 $this->apiReaction($uid, $method);
                 return;
@@ -2876,6 +2881,7 @@ final class Router
                 'GET ?route=api/thread&id=https://...',
                 'POST ?route=api/post',
                 'POST ?route=api/reply',
+                'POST ?route=api/follow',
                 'POST ?route=api/reaction',
                 'DELETE ?route=api/reaction&id=https://...&type=Like|Announce',
                 'PATCH ?route=api/post',
@@ -2991,6 +2997,46 @@ final class Router
         ]);
 
         Http::json(['post' => $this->apiObject($uid, $note)], 'application/json', 201);
+    }
+
+    private function apiFollow(string $uid, string $method): void
+    {
+        if ($method !== 'POST') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $input = $this->apiJsonBody();
+        $actorId = is_string($input['actor'] ?? null) ? trim($input['actor']) : '';
+        $query = is_string($input['actor_query'] ?? null) ? trim($input['actor_query']) : '';
+
+        if ($actorId === '' && $query === '') {
+            throw new \InvalidArgumentException('Falta actor o actor_query.');
+        }
+
+        if ($query !== '') {
+            $actor = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($query);
+            $actorId = ActivityPub::objectId($actor) ?? '';
+        } elseif ((new ActorRepository($this->store))->findById($actorId) === null && !$this->isLocalActorId($actorId) && str_starts_with($actorId, 'https://')) {
+            $actor = (new RemoteActorResolver($this->store, $this->users, $this->config))->resolve($actorId);
+            $actorId = ActivityPub::objectId($actor) ?? $actorId;
+        }
+
+        if ($actorId === '') {
+            throw new \InvalidArgumentException('Actor no válido.');
+        }
+
+        $graph = new SocialGraph($this->store);
+        $alreadyFollowing = $graph->isFollowing($uid, $actorId);
+        $message = $this->followActor($uid, $actorId, $graph);
+
+        Http::json([
+            'ok' => true,
+            'actor' => $this->apiActor($actorId),
+            'following' => true,
+            'already_following' => $alreadyFollowing,
+            'message' => $message,
+        ], 'application/json', $alreadyFollowing ? 200 : 201);
     }
 
     private function apiReaction(string $uid, string $method): void
@@ -3302,6 +3348,11 @@ final class Router
             'uid' => $uid,
             'actor' => $this->renderer->localUserInfo($uid) + ['id' => $this->users->actorId($uid)],
         ];
+    }
+
+    private function apiActor(string $actorId): array
+    {
+        return $this->renderer->actorInfo($actorId) + ['id' => $actorId];
     }
 
     private function tagPage(string $tag): void
