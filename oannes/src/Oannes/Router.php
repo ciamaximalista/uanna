@@ -2845,6 +2845,11 @@ final class Router
                 return;
             }
 
+            if ($path === 'reaction') {
+                $this->apiReaction($uid, $method);
+                return;
+            }
+
             if ($path === 'thread') {
                 $this->apiThread($uid, $method);
                 return;
@@ -2871,6 +2876,8 @@ final class Router
                 'GET ?route=api/thread&id=https://...',
                 'POST ?route=api/post',
                 'POST ?route=api/reply',
+                'POST ?route=api/reaction',
+                'DELETE ?route=api/reaction&id=https://...&type=Like|Announce',
                 'PATCH ?route=api/post',
                 'DELETE ?route=api/post&id=https://...',
             ],
@@ -2986,6 +2993,38 @@ final class Router
         Http::json(['post' => $this->apiObject($uid, $note)], 'application/json', 201);
     }
 
+    private function apiReaction(string $uid, string $method): void
+    {
+        if ($method === 'POST') {
+            $input = $this->apiJsonBody();
+            $id = $this->apiString($input, 'id');
+            $type = $this->apiReactionType($input['type'] ?? null);
+            $object = $this->repo->findByIdOrAlias($id);
+            if ($object === null || !$this->apiCanReadObject($uid, $object)) {
+                Http::notFound();
+                return;
+            }
+
+            Http::json($this->apiInteractionService()->react($uid, $id, $type), 'application/json', 201);
+            return;
+        }
+
+        if ($method === 'DELETE') {
+            $id = $this->apiRequiredId();
+            $type = $this->apiReactionType($_GET['type'] ?? null);
+            $object = $this->repo->findByIdOrAlias($id);
+            if ($object === null || !$this->apiCanReadObject($uid, $object)) {
+                Http::notFound();
+                return;
+            }
+
+            Http::json($this->apiInteractionService()->undo($uid, $id, $type));
+            return;
+        }
+
+        Http::methodNotAllowed();
+    }
+
     private function apiThread(string $uid, string $method): void
     {
         if ($method !== 'GET') {
@@ -3037,6 +3076,18 @@ final class Router
         );
     }
 
+    private function apiInteractionService(): InteractionService
+    {
+        return new InteractionService(
+            $this->store,
+            $this->users,
+            new FileQueue($this->store),
+            new SocialGraph($this->store),
+            new ActorRepository($this->store),
+            $this->config,
+        );
+    }
+
     private function apiJsonBody(): array
     {
         $body = file_get_contents('php://input');
@@ -3075,6 +3126,15 @@ final class Router
 
         if (!in_array($value, ['public', 'followers', 'direct'], true)) {
             throw new \InvalidArgumentException('Visibilidad no soportada.');
+        }
+
+        return $value;
+    }
+
+    private function apiReactionType(mixed $value): string
+    {
+        if (!is_string($value) || !in_array($value, ['Like', 'Announce'], true)) {
+            throw new \InvalidArgumentException('Tipo de reacción no soportado.');
         }
 
         return $value;

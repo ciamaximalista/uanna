@@ -72,6 +72,34 @@ curl -u usuario:contrasena \
   'https://maximalismo.red/api/reply'
 ```
 
+### `POST /api/reaction`
+
+Marca favorito o impulsa una publicacion visible para el usuario autenticado.
+
+```sh
+curl -u usuario:contrasena \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"https://...","type":"Like"}' \
+  'https://maximalismo.red/api/reaction'
+
+curl -u usuario:contrasena \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"https://...","type":"Announce"}' \
+  'https://maximalismo.red/api/reaction'
+```
+
+`Like` es favorito. `Announce` es impulso.
+
+### `DELETE /api/reaction?id=...&type=Like|Announce`
+
+Deshace un favorito o impulso.
+
+```sh
+curl -u usuario:contrasena \
+  -X DELETE \
+  'https://maximalismo.red/api/reaction?id=https%3A%2F%2F...&type=Like'
+```
+
 ### `PATCH /api/post`
 
 Edita una publicacion propia.
