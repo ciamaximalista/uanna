@@ -96,11 +96,76 @@ final class RemoteActorResolver
             ],
         ]);
         $body = @file_get_contents($url, false, $context);
+        $status = $this->responseStatus($http_response_header ?? []);
+
+        if ($body === false || in_array($status, [401, 403], true)) {
+            $headers = $this->signedGetHeaders($url, $accept);
+            if ($headers !== []) {
+                $context = stream_context_create([
+                    'http' => [
+                        'method' => 'GET',
+                        'header' => $this->formatHeaders($headers) . "User-Agent: Uanna/0.1\r\n",
+                        'ignore_errors' => true,
+                        'timeout' => 15,
+                    ],
+                ]);
+                $body = @file_get_contents($url, false, $context);
+            }
+        }
 
         if ($body === false) {
             throw new \RuntimeException('No se pudo consultar el actor remoto.');
         }
 
         return Json::decode($body, $url);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function signedGetHeaders(string $url, string $accept): array
+    {
+        $keys = new KeyStore($this->store);
+
+        foreach ($this->users->all() as $uid => $user) {
+            if (!is_string($uid) || !is_array($user)) {
+                continue;
+            }
+
+            $secret = $keys->secretKey($uid);
+            if ($secret === null) {
+                continue;
+            }
+
+            return (new HttpSignature())->signedGetHeaders($url, $this->users->actorId($uid) . '#main-key', $secret, $accept);
+        }
+
+        return [];
+    }
+
+    /**
+     * @param list<string> $headers
+     */
+    private function responseStatus(array $headers): int
+    {
+        $line = $headers[0] ?? '';
+        if (is_string($line) && preg_match('/^HTTP\/\S+\s+(\d{3})\b/', $line, $match)) {
+            return (int)$match[1];
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function formatHeaders(array $headers): string
+    {
+        $lines = '';
+        foreach ($headers as $name => $value) {
+            $lines .= $name . ': ' . $value . "\r\n";
+        }
+
+        return $lines;
     }
 }

@@ -214,14 +214,9 @@ final class InboxWorker
             return false;
         }
 
-        $repo = new ObjectRepository($this->store);
-        $existing = $repo->findByIdOrAlias($objectId);
-        $receivedBy = is_array($existing['_oannes_inbox_uids'] ?? null) ? $existing['_oannes_inbox_uids'] : [];
-        $receivedBy[] = $localUid;
-        $object['_oannes_inbox_uids'] = array_values(array_unique(array_filter($receivedBy, 'is_string')));
-
-        $this->store->writeObject($object);
-        (new IndexBuilder($this->store))->rebuild();
+        $this->storeAcceptedObject($localUid, $object);
+        $this->cacheObjectActor($object);
+        $this->hydrateThreadAncestors($localUid, $object);
         $this->notifyAcceptedCreate($localUid, $activity, $object);
 
         return true;
@@ -253,6 +248,8 @@ final class InboxWorker
         }
 
         $this->storeAcceptedObject($localUid, $object);
+        $this->cacheObjectActor($object);
+        $this->hydrateThreadAncestors($localUid, $object);
         $this->bumpLocalReplyThread($localUid, $object);
         $this->notifyAcceptedCreate($localUid, $activity, $object);
 
@@ -383,6 +380,8 @@ final class InboxWorker
             $existing = (new ObjectRepository($this->store))->findByIdOrAlias($objectId);
             if ($existing !== null) {
                 $this->storeAcceptedObject($localUid, $existing);
+                $this->cacheObjectActor($existing);
+                $this->hydrateThreadAncestors($localUid, $existing);
                 return;
             }
 
@@ -399,6 +398,7 @@ final class InboxWorker
 
         $this->storeAcceptedObject($localUid, $object);
         $this->cacheObjectActor($object);
+        $this->hydrateThreadAncestors($localUid, $object);
     }
 
     private function fetchRemoteObject(string $url): ?array
@@ -416,6 +416,23 @@ final class InboxWorker
             ],
         ]);
         $body = @file_get_contents($url, false, $context);
+        $status = $this->responseStatus($http_response_header ?? []);
+
+        if ($body === false || in_array($status, [401, 403], true)) {
+            $headers = $this->signedGetHeaders($url);
+            if ($headers !== []) {
+                $context = stream_context_create([
+                    'http' => [
+                        'method' => 'GET',
+                        'header' => $this->formatHeaders($headers) . "User-Agent: Uanna/0.1\r\n",
+                        'ignore_errors' => true,
+                        'timeout' => 15,
+                    ],
+                ]);
+                $body = @file_get_contents($url, false, $context);
+            }
+        }
+
         if ($body === false || $body === '') {
             return null;
         }
@@ -427,6 +444,61 @@ final class InboxWorker
         }
 
         return $object;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function signedGetHeaders(string $url): array
+    {
+        if (!is_string($this->config['base_url'] ?? null) || !is_string($this->config['local_actor_path'] ?? null)) {
+            return [];
+        }
+
+        $users = new LocalUsers($this->store, $this->config);
+        $keys = new KeyStore($this->store);
+        $accept = 'application/activity+json, application/ld+json; profile="https://www.w3.org/ns/activitystreams", application/json';
+
+        foreach ($users->all() as $uid => $user) {
+            if (!is_string($uid) || !is_array($user)) {
+                continue;
+            }
+
+            $secret = $keys->secretKey($uid);
+            if ($secret === null) {
+                continue;
+            }
+
+            return (new HttpSignature())->signedGetHeaders($url, $users->actorId($uid) . '#main-key', $secret, $accept);
+        }
+
+        return [];
+    }
+
+    /**
+     * @param list<string> $headers
+     */
+    private function responseStatus(array $headers): int
+    {
+        $line = $headers[0] ?? '';
+        if (is_string($line) && preg_match('/^HTTP\/\S+\s+(\d{3})\b/', $line, $match)) {
+            return (int)$match[1];
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function formatHeaders(array $headers): string
+    {
+        $lines = '';
+        foreach ($headers as $name => $value) {
+            $lines .= $name . ': ' . $value . "\r\n";
+        }
+
+        return $lines;
     }
 
     private function cacheObjectActor(array $object): void
@@ -443,6 +515,39 @@ final class InboxWorker
         $actor = $this->fetchRemoteObject($actorId);
         if ($actor !== null && ActivityPub::isActor($actor)) {
             $this->store->writeActor($actor);
+        }
+    }
+
+    private function hydrateThreadAncestors(string $localUid, array $object): void
+    {
+        $repo = new ObjectRepository($this->store);
+        $current = $object;
+        $seen = [];
+
+        for ($depth = 0; $depth < 8; $depth++) {
+            $parentId = ActivityPub::inReplyTo($current);
+            if ($parentId === null || isset($seen[$parentId])) {
+                break;
+            }
+
+            $seen[$parentId] = true;
+            $parent = $repo->findByIdOrAlias($parentId);
+            if ($parent === null) {
+                $parent = $this->fetchRemoteObject($parentId);
+            }
+
+            if ($parent === null || !in_array(ActivityPub::objectType($parent), ['Note', 'Article', 'Page', 'Question'], true)) {
+                break;
+            }
+
+            if (ActivityPub::objectId($parent) === null) {
+                break;
+            }
+
+            $this->storeAcceptedObject($localUid, $parent);
+            $this->cacheObjectActor($parent);
+            $current = $parent;
+            $repo = new ObjectRepository($this->store);
         }
     }
 

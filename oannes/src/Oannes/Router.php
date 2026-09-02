@@ -39,6 +39,11 @@ final class Router
             return;
         }
 
+        if ($route === 'api' || str_starts_with($route, 'api/')) {
+            $this->api($route, $method);
+            return;
+        }
+
         $this->runOpportunisticMaintenance($route, $method);
 
         if ($this->users->all() === [] && $route !== 'setup') {
@@ -269,6 +274,10 @@ final class Router
         }
 
         if ($path === '.well-known/webfinger' || $path === '.well-known/nodeinfo' || $path === 'nodeinfo/2.1') {
+            return $path;
+        }
+
+        if ($path === 'api' || str_starts_with($path, 'api/')) {
             return $path;
         }
 
@@ -2791,6 +2800,448 @@ final class Router
         }
 
         Http::notFound();
+    }
+
+    private function api(string $route, string $method): void
+    {
+        try {
+            $uid = $this->apiAuthenticatedUid();
+        } catch (\Throwable) {
+            header('WWW-Authenticate: Basic realm="Uanna API"');
+            Http::json(['error' => 'unauthorized'], 'application/json', 401);
+            return;
+        }
+
+        $path = trim(substr($route, 3), '/');
+
+        try {
+            if ($path === '') {
+                $this->apiIndex($uid);
+                return;
+            }
+
+            if ($path === 'me') {
+                if ($method !== 'GET') {
+                    Http::methodNotAllowed();
+                    return;
+                }
+
+                Http::json(['user' => $this->apiUser($uid)]);
+                return;
+            }
+
+            if ($path === 'timeline') {
+                $this->apiTimeline($uid, $method);
+                return;
+            }
+
+            if ($path === 'post') {
+                $this->apiPost($uid, $method);
+                return;
+            }
+
+            if ($path === 'reply') {
+                $this->apiReply($uid, $method);
+                return;
+            }
+
+            if ($path === 'thread') {
+                $this->apiThread($uid, $method);
+                return;
+            }
+        } catch (\InvalidArgumentException $e) {
+            Http::json(['error' => 'bad_request', 'message' => $e->getMessage()], 'application/json', 400);
+            return;
+        } catch (\Throwable $e) {
+            Http::json(['error' => 'server_error', 'message' => $e->getMessage()], 'application/json', 500);
+            return;
+        }
+
+        Http::notFound();
+    }
+
+    private function apiIndex(string $uid): void
+    {
+        Http::json([
+            'user' => $this->apiUser($uid),
+            'endpoints' => [
+                'GET ?route=api/me',
+                'GET ?route=api/timeline&scope=home|public|user|actor&limit=20&offset=0',
+                'GET ?route=api/post&id=https://...',
+                'GET ?route=api/thread&id=https://...',
+                'POST ?route=api/post',
+                'POST ?route=api/reply',
+                'PATCH ?route=api/post',
+                'DELETE ?route=api/post&id=https://...',
+            ],
+        ]);
+    }
+
+    private function apiTimeline(string $uid, string $method): void
+    {
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $scope = is_string($_GET['scope'] ?? null) ? (string)$_GET['scope'] : 'home';
+        $limit = $this->apiLimit();
+        $offset = $this->apiOffset();
+
+        if ($scope === 'home' || $scope === 'private') {
+            $objects = $this->privateTimeline($uid, $limit, $offset);
+        } elseif ($scope === 'public') {
+            $objects = $this->apiPublicTimeline($limit, $offset);
+        } elseif ($scope === 'user') {
+            $targetUid = is_string($_GET['user'] ?? null) ? (string)$_GET['user'] : '';
+            if ($targetUid === '' || $this->users->find($targetUid) === null) {
+                Http::notFound();
+                return;
+            }
+
+            $objects = $this->apiActorTimeline($uid, array_merge([$this->users->actorId($targetUid)], $this->users->legacyActorIds($targetUid)), $limit, $offset);
+        } elseif ($scope === 'actor') {
+            $actor = is_string($_GET['actor'] ?? null) ? (string)$_GET['actor'] : '';
+            if ($actor === '') {
+                throw new \InvalidArgumentException('Falta actor.');
+            }
+
+            $objects = $this->apiActorTimeline($uid, [$actor], $limit, $offset);
+        } else {
+            throw new \InvalidArgumentException('Scope no soportado.');
+        }
+
+        $objects = array_values(array_filter($objects, fn (array $object): bool => $this->apiCanReadObject($uid, $object)));
+
+        Http::json([
+            'scope' => $scope,
+            'limit' => $limit,
+            'offset' => $offset,
+            'items' => array_map(fn (array $object): array => $this->apiObject($uid, $object), $objects),
+        ]);
+    }
+
+    private function apiPost(string $uid, string $method): void
+    {
+        if ($method === 'GET') {
+            $id = $this->apiRequiredId();
+            $object = $this->repo->findByIdOrAlias($id);
+            if ($object === null || !$this->apiCanReadObject($uid, $object)) {
+                Http::notFound();
+                return;
+            }
+
+            Http::json(['post' => $this->apiObject($uid, $object)]);
+            return;
+        }
+
+        if ($method === 'POST') {
+            $input = $this->apiJsonBody();
+            $note = $this->apiPostService()->createNote($uid, $this->apiString($input, 'content'), [
+                'visibility' => $this->apiVisibility($input['visibility'] ?? 'public'),
+                'inReplyTo' => is_string($input['inReplyTo'] ?? null) ? $input['inReplyTo'] : null,
+                'to' => is_string($input['to'] ?? null) ? $input['to'] : null,
+            ]);
+
+            Http::json(['post' => $this->apiObject($uid, $note)], 'application/json', 201);
+            return;
+        }
+
+        if ($method === 'PATCH') {
+            $input = $this->apiJsonBody();
+            $note = $this->apiPostService()->updateNote($uid, $this->apiString($input, 'id'), $this->apiString($input, 'content'));
+            Http::json(['post' => $this->apiObject($uid, $note)]);
+            return;
+        }
+
+        if ($method === 'DELETE') {
+            $this->apiPostService()->deleteNote($uid, $this->apiRequiredId());
+            Http::json(['ok' => true]);
+            return;
+        }
+
+        Http::methodNotAllowed();
+    }
+
+    private function apiReply(string $uid, string $method): void
+    {
+        if ($method !== 'POST') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $input = $this->apiJsonBody();
+        $inReplyTo = $this->apiString($input, 'inReplyTo');
+        $parent = $this->repo->findByIdOrAlias($inReplyTo);
+        if ($parent === null || !$this->apiCanReadObject($uid, $parent)) {
+            Http::notFound();
+            return;
+        }
+
+        $note = $this->apiPostService()->createNote($uid, $this->apiString($input, 'content'), [
+            'visibility' => $this->apiVisibility($input['visibility'] ?? 'public'),
+            'inReplyTo' => $inReplyTo,
+        ]);
+
+        Http::json(['post' => $this->apiObject($uid, $note)], 'application/json', 201);
+    }
+
+    private function apiThread(string $uid, string $method): void
+    {
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $id = $this->apiRequiredId();
+        $object = $this->repo->findByIdOrAlias($id);
+        if ($object === null || !$this->apiCanReadObject($uid, $object)) {
+            Http::notFound();
+            return;
+        }
+
+        Http::json(['thread' => $this->apiThreadNode($uid, $object)]);
+    }
+
+    private function apiAuthenticatedUid(): string
+    {
+        $uid = $_SERVER['PHP_AUTH_USER'] ?? null;
+        $password = $_SERVER['PHP_AUTH_PW'] ?? null;
+
+        if ((!is_string($uid) || !is_string($password)) && is_string($_SERVER['HTTP_AUTHORIZATION'] ?? null)) {
+            $authorization = (string)$_SERVER['HTTP_AUTHORIZATION'];
+            if (preg_match('/^Basic\s+(.+)$/i', $authorization, $match)) {
+                $decoded = base64_decode($match[1], true);
+                if (is_string($decoded) && str_contains($decoded, ':')) {
+                    [$uid, $password] = explode(':', $decoded, 2);
+                }
+            }
+        }
+
+        $auth = $this->auth ?? new Auth($this->store);
+        if (!is_string($uid) || !is_string($password) || !$auth->verifyPassword($uid, $password) || $this->users->find($uid) === null) {
+            throw new \RuntimeException('unauthorized');
+        }
+
+        return $uid;
+    }
+
+    private function apiPostService(): PostService
+    {
+        return new PostService(
+            $this->store,
+            $this->users,
+            new FileQueue($this->store),
+            new SocialGraph($this->store),
+            $this->config,
+        );
+    }
+
+    private function apiJsonBody(): array
+    {
+        $body = file_get_contents('php://input');
+        if (!is_string($body) || trim($body) === '') {
+            throw new \InvalidArgumentException('El cuerpo JSON está vacío.');
+        }
+
+        try {
+            $data = Json::decode($body, 'api request');
+        } catch (\Throwable $e) {
+            throw new \InvalidArgumentException($e->getMessage(), 0, $e);
+        }
+
+        if (!is_array($data)) {
+            throw new \InvalidArgumentException('El cuerpo JSON debe ser un objeto.');
+        }
+
+        return $data;
+    }
+
+    private function apiString(array $input, string $field): string
+    {
+        $value = $input[$field] ?? null;
+        if (!is_string($value) || trim($value) === '') {
+            throw new \InvalidArgumentException('Falta ' . $field . '.');
+        }
+
+        return trim($value);
+    }
+
+    private function apiVisibility(mixed $value): string
+    {
+        if (!is_string($value) || $value === '') {
+            return 'public';
+        }
+
+        if (!in_array($value, ['public', 'followers', 'direct'], true)) {
+            throw new \InvalidArgumentException('Visibilidad no soportada.');
+        }
+
+        return $value;
+    }
+
+    private function apiRequiredId(): string
+    {
+        $id = $_GET['id'] ?? null;
+        if (!is_string($id) || trim($id) === '') {
+            throw new \InvalidArgumentException('Falta id.');
+        }
+
+        return trim($id);
+    }
+
+    private function apiLimit(): int
+    {
+        return max(1, min(100, (int)($_GET['limit'] ?? 20)));
+    }
+
+    private function apiOffset(): int
+    {
+        return max(0, (int)($_GET['offset'] ?? 0));
+    }
+
+    private function apiPublicTimeline(int $limit, int $offset): array
+    {
+        $objects = array_values(array_filter(
+            $this->repo->recent($offset + $limit),
+            fn (array $object): bool => ActivityPub::isPublicObject($object) && !$this->objectBlocked($object)
+        ));
+
+        return array_slice($objects, $offset, $limit);
+    }
+
+    private function apiActorTimeline(string $uid, array $actorIds, int $limit, int $offset): array
+    {
+        $objects = $this->repo->byAnyActor($actorIds, $offset + $limit);
+        $objects = array_values(array_filter($objects, fn (array $object): bool => $this->apiCanReadObject($uid, $object)));
+
+        return array_slice($objects, $offset, $limit);
+    }
+
+    private function apiCanReadObject(string $uid, array $object): bool
+    {
+        if ($this->objectBlocked($object)) {
+            return false;
+        }
+
+        if (ActivityPub::isPublicObject($object)) {
+            return true;
+        }
+
+        if ($this->apiCanEditObject($uid, $object)) {
+            return true;
+        }
+
+        $localIds = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
+        $audience = ActivityPub::audience($object);
+        foreach ($localIds as $actorId) {
+            if (in_array($actorId, $audience, true)) {
+                return true;
+            }
+        }
+
+        $receivedBy = $object['_oannes_inbox_uids'] ?? [];
+        if (is_array($receivedBy) && in_array($uid, $receivedBy, true)) {
+            return true;
+        }
+
+        $actor = ActivityPub::attributedTo($object);
+        if ($actor !== null && $this->isLocalActorId($actor)) {
+            return false;
+        }
+
+        return $this->objectVisibleInUserTimeline($uid, $object);
+    }
+
+    private function apiThreadNode(string $uid, array $object, int $depth = 0): array
+    {
+        $node = $this->apiObject($uid, $object);
+        $node['replies'] = [];
+
+        if ($depth >= 8) {
+            return $node;
+        }
+
+        $id = ActivityPub::objectId($object);
+        if ($id === null) {
+            return $node;
+        }
+
+        foreach ($this->repo->childrenOf($id) as $child) {
+            if (!$this->apiCanReadObject($uid, $child)) {
+                continue;
+            }
+
+            $node['replies'][] = $this->apiThreadNode($uid, $child, $depth + 1);
+        }
+
+        usort($node['replies'], static fn (array $a, array $b): int => strcmp((string)($a['published'] ?? ''), (string)($b['published'] ?? '')));
+        return $node;
+    }
+
+    private function apiObject(string $uid, array $object): array
+    {
+        $actorId = ActivityPub::attributedTo($object) ?? '';
+        $id = ActivityPub::objectId($object) ?? '';
+        $interactions = new InteractionService(
+            $this->store,
+            $this->users,
+            new FileQueue($this->store),
+            new SocialGraph($this->store),
+            new ActorRepository($this->store),
+            $this->config,
+        );
+
+        return [
+            'id' => $id,
+            'type' => ActivityPub::objectType($object),
+            'url' => is_string($object['url'] ?? null) ? $object['url'] : $id,
+            'actor' => $actorId !== '' ? $this->renderer->actorInfo($actorId) + ['id' => $actorId] : null,
+            'published' => ActivityPub::published($object),
+            'updated' => is_string($object['updated'] ?? null) ? $object['updated'] : null,
+            'visibility' => $this->apiObjectVisibility($object),
+            'inReplyTo' => ActivityPub::inReplyTo($object),
+            'content' => is_string($object['content'] ?? null) ? $object['content'] : '',
+            'sourceContent' => is_string($object['sourceContent'] ?? null) ? $object['sourceContent'] : null,
+            'summary' => is_string($object['summary'] ?? null) ? $object['summary'] : '',
+            'attachments' => is_array($object['attachment'] ?? null) ? $object['attachment'] : [],
+            'tags' => is_array($object['tag'] ?? null) ? $object['tag'] : [],
+            'counts' => $interactions->counts($object),
+            'canEdit' => $this->apiCanEditObject($uid, $object),
+        ];
+    }
+
+    private function apiObjectVisibility(array $object): string
+    {
+        if (ActivityPub::isPublicObject($object)) {
+            return 'public';
+        }
+
+        foreach (ActivityPub::audience($object) as $target) {
+            if (is_string($target) && str_ends_with($target, '/followers')) {
+                return 'followers';
+            }
+        }
+
+        return 'direct';
+    }
+
+    private function apiCanEditObject(string $uid, array $object): bool
+    {
+        $actor = ActivityPub::attributedTo($object);
+        if ($actor === null) {
+            return false;
+        }
+
+        return in_array($actor, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true);
+    }
+
+    private function apiUser(string $uid): array
+    {
+        return [
+            'uid' => $uid,
+            'actor' => $this->renderer->localUserInfo($uid) + ['id' => $this->users->actorId($uid)],
+        ];
     }
 
     private function tagPage(string $tag): void

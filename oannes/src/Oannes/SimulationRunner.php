@@ -286,6 +286,19 @@ final class SimulationRunner
         } catch (\Throwable $e) {
             $this->check('wrong keyId rejected', $e->getMessage() === 'HTTP Signature key does not match activity actor');
         }
+
+        $getHeaders = (new HttpSignature())->signedGetHeaders(
+            $bad['config']['base_url'] . '/ap/objects/private-' . $iteration,
+            $bad['remote_actor'] . '#main-key',
+            $bad['remote_private'],
+            'application/activity+json'
+        );
+        $this->check('signed GET verifies', (new HttpSignature())->verifyRequest(
+            $getHeaders,
+            'GET',
+            '/ap/objects/private-' . $iteration,
+            $bad['remote']['publicKey']['publicKeyPem']
+        ));
     }
 
     private function scenarioRemoteActorUpdateRefreshesAvatar(int $iteration): void
