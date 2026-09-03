@@ -122,6 +122,24 @@ curl -u usuario:contrasena \
 
 `Like` es favorito. `Announce` es impulso.
 
+### `GET /api/reaction?id=...`
+
+Devuelve los actores que han favoriteado o impulsado una publicacion visible para el usuario autenticado.
+
+```sh
+curl -u usuario:contrasena \
+  'https://maximalismo.red/api/reaction?id=https%3A%2F%2F...'
+```
+
+Respuesta:
+
+```json
+{
+  "likes": ["https://..."],
+  "boosts": ["https://..."]
+}
+```
+
 ### `DELETE /api/reaction?id=...&type=Like|Announce`
 
 Deshace un favorito o impulso.

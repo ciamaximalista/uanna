@@ -2891,6 +2891,7 @@ final class Router
                 'POST ?route=api/reply',
                 'POST ?route=api/follow',
                 'POST ?route=api/unfollow',
+                'GET ?route=api/reaction&id=https://...',
                 'POST ?route=api/reaction',
                 'DELETE ?route=api/reaction&id=https://...&type=Like|Announce',
                 'PATCH ?route=api/post',
@@ -3100,6 +3101,18 @@ final class Router
             }
 
             Http::json($this->apiInteractionService()->undo($uid, $id, $type));
+            return;
+        }
+
+        if ($method === 'GET') {
+            $id = $this->apiRequiredId();
+            $object = $this->repo->findByIdOrAlias($id);
+            if ($object === null || !$this->apiCanReadObject($uid, $object)) {
+                Http::notFound();
+                return;
+            }
+
+            Http::json($this->apiInteractionService()->actors($object));
             return;
         }
 
