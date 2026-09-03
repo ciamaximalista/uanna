@@ -3725,6 +3725,32 @@ final class Router
             }
 
             $type = (string)($record['type'] ?? 'Notificación');
+            $objid = (string)($record['objid'] ?? '');
+            $reason = is_string($record['reason'] ?? null) ? (string)$record['reason'] : null;
+
+            if (in_array($type, ['Like', 'Announce'], true)) {
+                $reason = $this->notificationInteractionReason($uid, $type, $objid);
+                if ($reason === null) {
+                    continue;
+                }
+            }
+
+            if ($type === 'Webmention') {
+                $object = $objid !== '' ? $this->repo->findByIdOrAlias($objid) : null;
+                if ($object === null || !$this->apiCanEditObject($uid, $object)) {
+                    continue;
+                }
+
+                $reason = 'own_post';
+            }
+
+            if ($type === 'Create') {
+                $object = $objid !== '' ? $this->repo->findByIdOrAlias($objid) : null;
+                if ($object === null || !$this->localUserParticipatedInThread($uid, $object)) {
+                    continue;
+                }
+            }
+
             $items[] = [
                 'type' => $type,
                 'label' => match ($type) {
@@ -3737,13 +3763,71 @@ final class Router
                     default => $type,
                 },
                 'actor' => $actor,
-                'objid' => (string)($record['objid'] ?? ''),
+                'objid' => $objid,
                 'date' => (string)($record['date'] ?? ''),
+                'reason' => $reason,
             ];
         }
 
         usort($items, static fn (array $a, array $b): int => strcmp((string)$b['date'], (string)$a['date']));
         return array_slice($items, 0, $limit);
+    }
+
+    private function notificationInteractionReason(string $uid, string $type, string $objectId): ?string
+    {
+        if ($objectId === '') {
+            return null;
+        }
+
+        $object = $this->repo->findByIdOrAlias($objectId);
+        if ($object !== null && $this->apiCanEditObject($uid, $object)) {
+            return 'own_post';
+        }
+
+        if ($type !== 'Announce') {
+            return null;
+        }
+
+        return $this->apiInteractionService()->hasLocalReaction($uid, $objectId, 'Announce') ? 'shared_boost' : null;
+    }
+
+    private function localUserParticipatedInThread(string $uid, array $object): bool
+    {
+        if ($this->apiCanEditObject($uid, $object)) {
+            return true;
+        }
+
+        $root = $this->threadRoot($this->repo, $object);
+        if ($this->apiCanEditObject($uid, $root)) {
+            return true;
+        }
+
+        $rootId = ActivityPub::objectId($root);
+        if ($rootId === null) {
+            return false;
+        }
+
+        return $this->threadContainsLocalUserObject($uid, $rootId);
+    }
+
+    private function threadContainsLocalUserObject(string $uid, string $parentId, int $depth = 0): bool
+    {
+        if ($depth >= 8) {
+            return false;
+        }
+
+        foreach ($this->repo->childrenOf($parentId) as $child) {
+            if ($this->apiCanEditObject($uid, $child)) {
+                return true;
+            }
+
+            $childId = ActivityPub::objectId($child);
+            if ($childId !== null && $this->threadContainsLocalUserObject($uid, $childId, $depth + 1)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function latestPrivateMessages(string $uid, int $limit = 30): array

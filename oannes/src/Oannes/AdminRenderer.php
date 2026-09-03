@@ -661,7 +661,7 @@ final class AdminRenderer
             $type = (string)($notification['type'] ?? '');
             $actor = (string)($notification['actor'] ?? '');
             $objid = (string)($notification['objid'] ?? '');
-            $body = $this->notificationBody($type, $actor, $objid);
+            $body = $this->notificationBody($notification);
 
             $html .= '<article class="notification">'
                 . '<strong>' . Html::escape((string)($notification['label'] ?? $this->t('notification.title', 'Notificación'))) . '</strong>'
@@ -673,11 +673,20 @@ final class AdminRenderer
         return $html !== '' ? '<div class="notifications">' . $html . '</div>' : '<p class="muted">' . Html::escape($this->t('notification.empty', 'Sin notificaciones recientes.')) . '</p>';
     }
 
-    private function notificationBody(string $type, string $actor, string $objid): string
+    private function notificationBody(array $notification): string
     {
+        $type = (string)($notification['type'] ?? '');
+        $actor = (string)($notification['actor'] ?? '');
+        $objid = (string)($notification['objid'] ?? '');
+        $reason = (string)($notification['reason'] ?? '');
+
         if (in_array($type, ['Like', 'Announce'], true) && $actor !== '' && $objid !== '') {
             $verb = $type === 'Like' ? $this->t('notification.favorited', 'favoriteó') : $this->t('notification.boosted', 'impulsó');
-            return '<p class="meta">' . $this->actorLink($actor) . ' ' . $verb . ' <a href="' . Html::escape($objid) . '">' . Html::escape($objid) . '</a></p>';
+            $target = $reason === 'shared_boost'
+                ? $this->t('notification.shared_boost_target', 'una entrada que tú habías impulsado')
+                : $this->t('notification.own_post_target', 'tu entrada');
+
+            return '<p class="meta">' . $this->actorLink($actor) . ' ' . $verb . ' ' . Html::escape($target) . ' <a href="' . Html::escape($objid) . '">' . Html::escape($objid) . '</a></p>';
         }
 
         if ($type === 'Follow' && $actor !== '') {

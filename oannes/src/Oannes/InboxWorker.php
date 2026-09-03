@@ -367,7 +367,12 @@ final class InboxWorker
 
         $activity['object'] = $object;
         $this->store->writeJson($this->remoteInteractionPath($localUid, $actor, $type, $object), $activity);
-        $this->writeNotification($localUid, $type, $actor, $object, ActivityPub::published($activity));
+        $reason = $this->interactionNotificationReason($localUid, $type, $object);
+        if ($reason !== null) {
+            $this->writeNotification($localUid, $type, $actor, $object, ActivityPub::published($activity), [
+                'reason' => $reason,
+            ]);
+        }
 
         return true;
     }
@@ -613,8 +618,15 @@ final class InboxWorker
             return false;
         }
 
+        $object = (new ObjectRepository($this->store))->findByIdOrAlias($target);
+        if ($object === null || !$this->isLocalUserObject($localUid, $object)) {
+            return false;
+        }
+
         $source = $this->lastActorUpdateUrl($actorId) ?: $this->recentActorUpdateUrl($localUid, $actorId) ?: $actorId;
-        $this->writeNotification($localUid, 'Webmention', $source, $target, ActivityPub::published($activity));
+        $this->writeNotification($localUid, 'Webmention', $source, $target, ActivityPub::published($activity), [
+            'reason' => 'own_post',
+        ]);
 
         return true;
     }
@@ -677,21 +689,89 @@ final class InboxWorker
             return;
         }
 
+        if (!$this->localUserParticipatedInThread($localUid, $object)) {
+            return;
+        }
+
         $this->writeNotification($localUid, 'Create', $actor, $objectId, ActivityPub::published($object));
     }
 
-    private function writeNotification(string $localUid, string $type, string $actor, string $objid, string $date = ''): void
+    private function localUserParticipatedInThread(string $localUid, array $object): bool
+    {
+        if ($this->isLocalUserObject($localUid, $object)) {
+            return true;
+        }
+
+        $repo = new ObjectRepository($this->store);
+        $root = $this->threadRoot($repo, $object);
+
+        if ($this->isLocalUserObject($localUid, $root)) {
+            return true;
+        }
+
+        $rootId = ActivityPub::objectId($root);
+        if ($rootId === null) {
+            return false;
+        }
+
+        return $this->threadContainsLocalUserObject($localUid, $repo, $rootId);
+    }
+
+    private function threadContainsLocalUserObject(string $localUid, ObjectRepository $repo, string $parentId, int $depth = 0): bool
+    {
+        if ($depth >= 8) {
+            return false;
+        }
+
+        foreach ($repo->childrenOf($parentId) as $child) {
+            if ($this->isLocalUserObject($localUid, $child)) {
+                return true;
+            }
+
+            $childId = ActivityPub::objectId($child);
+            if ($childId !== null && $this->threadContainsLocalUserObject($localUid, $repo, $childId, $depth + 1)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function interactionNotificationReason(string $localUid, string $type, string $objectId): ?string
+    {
+        $object = (new ObjectRepository($this->store))->findByIdOrAlias($objectId);
+        if ($object !== null && $this->isLocalUserObject($localUid, $object)) {
+            return 'own_post';
+        }
+
+        if ($type !== 'Announce') {
+            return null;
+        }
+
+        $hasLocalBoost = (new InteractionService(
+            $this->store,
+            new LocalUsers($this->store, $this->config),
+            $this->queue,
+            new SocialGraph($this->store),
+            new ActorRepository($this->store),
+            $this->config,
+        ))->hasLocalReaction($localUid, $objectId, 'Announce');
+
+        return $hasLocalBoost ? 'shared_boost' : null;
+    }
+
+    private function writeNotification(string $localUid, string $type, string $actor, string $objid, string $date = '', array $extra = []): void
     {
         $root = $this->notificationRoot();
         $id = Id::digest($type . ':' . $actor . ':' . $objid);
 
-        $this->store->writeJson($root . '/users/' . rawurlencode($localUid) . '/notify/' . $id . '.json', [
+        $this->store->writeJson($root . '/users/' . rawurlencode($localUid) . '/notify/' . $id . '.json', array_merge([
             'type' => $type,
             'utype' => $type,
             'actor' => $actor,
             'objid' => $objid,
             'date' => $date !== '' ? $date : gmdate('c'),
-        ]);
+        ], $extra));
     }
 
     private function notificationRoot(): string

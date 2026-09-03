@@ -183,6 +183,35 @@ final class SimulationRunner
         $this->check('reply to local user bumps thread date', ($storedRoot['_oannes_thread_activity_at'] ?? null) === '2026-01-01T00:00:00Z');
         $this->check('bumped local thread sorts before newer local post', $topLocalId === $oldRoot['id']);
         $this->check('notified reply enters private timeline', in_array($replyId, $privateIds, true));
+        $this->check('reply to participated thread creates notification', is_file($store->dataDir() . '/users/ana/notify/' . Id::digest('Create:' . $env['remote_actor'] . ':' . $replyId) . '.json'));
+
+        $externalRoot = [
+            'id' => 'https://third.test/notes/root-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => 'https://third.test/users/mara',
+            'published' => '2026-01-01T01:00:00Z',
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'External root',
+        ];
+        $store->writeObject($externalRoot);
+        (new IndexBuilder($store))->rebuild();
+        $externalReplyId = 'https://remote.test/notes/external-thread-reply-' . $iteration;
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/external-thread-reply-' . $iteration,
+            'type' => 'Create',
+            'actor' => $env['remote_actor'],
+            'object' => [
+                'id' => $externalReplyId,
+                'type' => 'Note',
+                'attributedTo' => $env['remote_actor'],
+                'published' => '2026-01-01T01:05:00Z',
+                'to' => [ActivityPub::PUBLIC_AUDIENCE],
+                'content' => 'Reply in unrelated external thread',
+                'inReplyTo' => $externalRoot['id'],
+            ],
+        ]);
+        (new InboxWorker($store, $env['queue'], $env['config']))->run();
+        $this->check('followed reply in unparticipated thread does not notify', !is_file($store->dataDir() . '/users/ana/notify/' . Id::digest('Create:' . $env['remote_actor'] . ':' . $externalReplyId) . '.json'));
 
         (new SocialGraph($store))->removeFollowing('ana', $env['remote_actor']);
         $standaloneId = 'https://remote.test/notes/notified-standalone-' . $iteration;
@@ -676,7 +705,7 @@ final class SimulationRunner
             ]);
         }
 
-        (new InboxWorker($env['store'], $env['queue']))->run(10);
+        (new InboxWorker($env['store'], $env['queue'], $env['config']))->run(10);
         $interactions = new InteractionService(
             $env['store'],
             new LocalUsers($env['store'], $env['config']),
@@ -689,6 +718,46 @@ final class SimulationRunner
 
         $this->check('incoming like accepted without moderation', ($counts['likes'] ?? 0) === 1);
         $this->check('incoming announce accepted without moderation', ($counts['boosts'] ?? 0) === 1);
+
+        $notifyRoot = $env['store']->dataDir() . '/users/ana/notify/';
+        $ownLike = $env['store']->readJson($notifyRoot . Id::digest('Like:' . $env['remote_actor'] . ':' . $object['id']) . '.json');
+        $ownAnnounce = $env['store']->readJson($notifyRoot . Id::digest('Announce:' . $env['remote_actor'] . ':' . $object['id']) . '.json');
+        $this->check('incoming like on own post notifies as own post', ($ownLike['reason'] ?? null) === 'own_post');
+        $this->check('incoming announce on own post notifies as own post', ($ownAnnounce['reason'] ?? null) === 'own_post');
+
+        $thirdParty = [
+            'id' => 'https://third.test/objects/interaction-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => 'https://third.test/users/mara',
+            'published' => gmdate('c'),
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'Third party interaction target',
+        ];
+        $env['store']->writeObject($thirdParty);
+        (new IndexBuilder($env['store']))->rebuild();
+
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/like-third-' . $iteration,
+            'type' => 'Like',
+            'actor' => $env['remote_actor'],
+            'object' => $thirdParty['id'],
+            'published' => gmdate('c'),
+        ]);
+        (new InboxWorker($env['store'], $env['queue'], $env['config']))->run(10);
+        $thirdLikePath = $notifyRoot . Id::digest('Like:' . $env['remote_actor'] . ':' . $thirdParty['id']) . '.json';
+        $this->check('incoming like on third-party post does not notify', !is_file($thirdLikePath));
+
+        $interactions->react('ana', $thirdParty['id'], 'Announce');
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/announce-third-' . $iteration,
+            'type' => 'Announce',
+            'actor' => $env['remote_actor'],
+            'object' => $thirdParty['id'],
+            'published' => gmdate('c'),
+        ]);
+        (new InboxWorker($env['store'], $env['queue'], $env['config']))->run(10);
+        $sharedBoost = $env['store']->readJson($notifyRoot . Id::digest('Announce:' . $env['remote_actor'] . ':' . $thirdParty['id']) . '.json');
+        $this->check('incoming announce on locally boosted post notifies as shared boost', ($sharedBoost['reason'] ?? null) === 'shared_boost');
     }
 
     private function scenarioRemoteBoostFromFollowed(int $iteration): void
@@ -714,7 +783,7 @@ final class SimulationRunner
             'published' => gmdate('c'),
         ]);
 
-        (new InboxWorker($env['store'], $env['queue']))->run(10);
+        (new InboxWorker($env['store'], $env['queue'], $env['config']))->run(10);
         $repo = new ObjectRepository($env['store']);
         $interactions = new InteractionService(
             $env['store'],
@@ -765,7 +834,7 @@ final class SimulationRunner
             'published' => gmdate('c'),
         ]);
 
-        (new InboxWorker($env['store'], $env['queue']))->run(10);
+        (new InboxWorker($env['store'], $env['queue'], $env['config']))->run(10);
         $counts = (new InteractionService(
             $env['store'],
             new LocalUsers($env['store'], $env['config']),
