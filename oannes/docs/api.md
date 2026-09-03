@@ -88,6 +88,22 @@ curl -u usuario:contrasena \
   'https://maximalismo.red/api/follow'
 ```
 
+### `POST /api/unfollow`
+
+Deja de seguir a un actor local o remoto. Acepta los mismos campos que `POST /api/follow`.
+
+```sh
+curl -u usuario:contrasena \
+  -H 'Content-Type: application/json' \
+  -d '{"actor_query":"@javisamo@mastodon.social"}' \
+  'https://maximalismo.red/api/unfollow'
+
+curl -u usuario:contrasena \
+  -H 'Content-Type: application/json' \
+  -d '{"actor":"https://mastodon.social/users/javisamo"}' \
+  'https://maximalismo.red/api/unfollow'
+```
+
 ### `POST /api/reaction`
 
 Marca favorito o impulsa una publicacion visible para el usuario autenticado.

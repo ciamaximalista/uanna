@@ -5,6 +5,9 @@ namespace Oannes;
 final class Router
 {
     private bool $timelineInboxRefreshed = false;
+    private ?InteractionService $apiInteractionService = null;
+    private array $notificationInteractionReasonCache = [];
+    private array $threadParticipationCache = [];
 
     public function __construct(
         private readonly array $config,
@@ -2850,6 +2853,11 @@ final class Router
                 return;
             }
 
+            if ($path === 'unfollow') {
+                $this->apiUnfollow($uid, $method);
+                return;
+            }
+
             if ($path === 'reaction') {
                 $this->apiReaction($uid, $method);
                 return;
@@ -2882,6 +2890,7 @@ final class Router
                 'POST ?route=api/post',
                 'POST ?route=api/reply',
                 'POST ?route=api/follow',
+                'POST ?route=api/unfollow',
                 'POST ?route=api/reaction',
                 'DELETE ?route=api/reaction&id=https://...&type=Like|Announce',
                 'PATCH ?route=api/post',
@@ -3006,7 +3015,43 @@ final class Router
             return;
         }
 
-        $input = $this->apiJsonBody();
+        $actorId = $this->apiResolveActorInput($this->apiJsonBody());
+        $graph = new SocialGraph($this->store);
+        $alreadyFollowing = $graph->isFollowing($uid, $actorId);
+        $message = $this->followActor($uid, $actorId, $graph);
+
+        Http::json([
+            'ok' => true,
+            'actor' => $this->apiActor($actorId),
+            'following' => true,
+            'already_following' => $alreadyFollowing,
+            'message' => $message,
+        ], 'application/json', $alreadyFollowing ? 200 : 201);
+    }
+
+    private function apiUnfollow(string $uid, string $method): void
+    {
+        if ($method !== 'POST') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $actorId = $this->apiResolveActorInput($this->apiJsonBody());
+        $graph = new SocialGraph($this->store);
+        $wasFollowing = $graph->isFollowing($uid, $actorId);
+        $message = $this->unfollowActor($uid, $actorId, $graph);
+
+        Http::json([
+            'ok' => true,
+            'actor' => $this->apiActor($actorId),
+            'following' => false,
+            'was_following' => $wasFollowing,
+            'message' => $message,
+        ]);
+    }
+
+    private function apiResolveActorInput(array $input): string
+    {
         $actorId = is_string($input['actor'] ?? null) ? trim($input['actor']) : '';
         $query = is_string($input['actor_query'] ?? null) ? trim($input['actor_query']) : '';
 
@@ -3026,17 +3071,7 @@ final class Router
             throw new \InvalidArgumentException('Actor no válido.');
         }
 
-        $graph = new SocialGraph($this->store);
-        $alreadyFollowing = $graph->isFollowing($uid, $actorId);
-        $message = $this->followActor($uid, $actorId, $graph);
-
-        Http::json([
-            'ok' => true,
-            'actor' => $this->apiActor($actorId),
-            'following' => true,
-            'already_following' => $alreadyFollowing,
-            'message' => $message,
-        ], 'application/json', $alreadyFollowing ? 200 : 201);
+        return $actorId;
     }
 
     private function apiReaction(string $uid, string $method): void
@@ -3124,7 +3159,7 @@ final class Router
 
     private function apiInteractionService(): InteractionService
     {
-        return new InteractionService(
+        return $this->apiInteractionService ??= new InteractionService(
             $this->store,
             $this->users,
             new FileQueue($this->store),
@@ -3710,7 +3745,7 @@ final class Router
     private function latestNotifications(string $uid, int $limit = 12): array
     {
         $relations = new SocialRelationService($this->store);
-        $items = [];
+        $records = [];
 
         foreach (glob($this->store->dataDir() . '/users/' . rawurlencode($uid) . '/notify/*.json') ?: [] as $file) {
             try {
@@ -3719,6 +3754,13 @@ final class Router
                 continue;
             }
 
+            $records[] = $record;
+        }
+
+        usort($records, static fn (array $a, array $b): int => strcmp((string)($b['date'] ?? ''), (string)($a['date'] ?? '')));
+
+        $items = [];
+        foreach ($records as $record) {
             $actor = (string)($record['actor'] ?? '');
             if ($actor !== '' && $relations->isBlocked($uid, $actor)) {
                 continue;
@@ -3767,10 +3809,13 @@ final class Router
                 'date' => (string)($record['date'] ?? ''),
                 'reason' => $reason,
             ];
+
+            if (count($items) >= $limit) {
+                break;
+            }
         }
 
-        usort($items, static fn (array $a, array $b): int => strcmp((string)$b['date'], (string)$a['date']));
-        return array_slice($items, 0, $limit);
+        return $items;
     }
 
     private function notificationInteractionReason(string $uid, string $type, string $objectId): ?string
@@ -3779,35 +3824,83 @@ final class Router
             return null;
         }
 
-        $object = $this->repo->findByIdOrAlias($objectId);
-        if ($object !== null && $this->apiCanEditObject($uid, $object)) {
-            return 'own_post';
+        $cacheKey = $uid . "\n" . $type . "\n" . $objectId;
+        if (array_key_exists($cacheKey, $this->notificationInteractionReasonCache)) {
+            return $this->notificationInteractionReasonCache[$cacheKey];
         }
 
-        if ($type !== 'Announce') {
-            return null;
+        if ($this->objectIdLooksOwnedByUser($uid, $objectId)) {
+            return $this->notificationInteractionReasonCache[$cacheKey] = 'own_post';
         }
 
-        return $this->apiInteractionService()->hasLocalReaction($uid, $objectId, 'Announce') ? 'shared_boost' : null;
+        if ($type === 'Like') {
+            return $this->notificationInteractionReasonCache[$cacheKey] = null;
+        }
+
+        if ($type === 'Announce' && $this->apiInteractionService()->hasLocalReactionForCanonicalId($uid, $objectId, 'Announce')) {
+            return $this->notificationInteractionReasonCache[$cacheKey] = 'shared_boost';
+        }
+
+        return $this->notificationInteractionReasonCache[$cacheKey] = null;
+    }
+
+    private function objectIdLooksOwnedByUser(string $uid, string $objectId): bool
+    {
+        foreach (array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)) as $actorId) {
+            if (str_starts_with($objectId, rtrim($actorId, '/') . '/')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function localUserParticipatedInThread(string $uid, array $object): bool
     {
+        $objectId = ActivityPub::objectId($object) ?? Id::digest(Json::encode($object));
+        $cacheKey = $uid . "\n" . $objectId;
+        if (array_key_exists($cacheKey, $this->threadParticipationCache)) {
+            return $this->threadParticipationCache[$cacheKey];
+        }
+
         if ($this->apiCanEditObject($uid, $object)) {
-            return true;
+            return $this->threadParticipationCache[$cacheKey] = true;
         }
 
         $root = $this->threadRoot($this->repo, $object);
         if ($this->apiCanEditObject($uid, $root)) {
-            return true;
+            return $this->threadParticipationCache[$cacheKey] = true;
         }
 
         $rootId = ActivityPub::objectId($root);
         if ($rootId === null) {
-            return false;
+            return $this->threadParticipationCache[$cacheKey] = false;
         }
 
-        return $this->threadContainsLocalUserObject($uid, $rootId);
+        return $this->threadParticipationCache[$cacheKey] = $this->threadContainsLocalUserObject($uid, $rootId);
+    }
+
+    private function threadRoot(ObjectRepository $repo, array $object): array
+    {
+        $root = $object;
+        $seen = [];
+
+        for ($depth = 0; $depth < 8; $depth++) {
+            $parentId = ActivityPub::inReplyTo($root);
+            if ($parentId === null || isset($seen[$parentId])) {
+                break;
+            }
+
+            $seen[$parentId] = true;
+            $parent = $repo->findByIdOrAlias($parentId);
+            if ($parent === null) {
+                break;
+            }
+
+            $root = $parent;
+        }
+
+        return $root;
     }
 
     private function threadContainsLocalUserObject(string $uid, string $parentId, int $depth = 0): bool
