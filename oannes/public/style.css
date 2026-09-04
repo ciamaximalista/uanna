@@ -1075,14 +1075,18 @@ h3 {
 
 .profile-main {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 1rem;
     padding: 0 1rem 1rem;
-    margin-top: -2.6rem;
+    margin-top: -3.25rem;
 }
 
-.profile-main > div {
+.profile-title {
     min-width: 0;
+}
+
+.profile-details {
+    padding: 0 1rem 1rem;
 }
 
 .profile-social-controls {
@@ -1118,6 +1122,22 @@ h3 {
     font-size: 0.82rem;
 }
 
+.profile-followers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.profile-social-counts {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+
+.profile-following-avatars {
+    margin-top: 0.3rem;
+}
+
 .followed-by-avatar-link {
     display: inline-flex;
     width: 1.55rem;
@@ -1149,8 +1169,8 @@ h3 {
 
 .avatar {
     flex: 0 0 auto;
-    width: 5.2rem;
-    height: 5.2rem;
+    width: 6.5rem;
+    height: 6.5rem;
     border: 4px solid var(--panel);
     border-radius: 50%;
     object-fit: cover;
@@ -1168,6 +1188,8 @@ h3 {
 .bio {
     padding: 0 1rem 1rem;
     margin: 0;
+    font-size: 1.08rem;
+    line-height: 1.55;
 }
 
 .profile-email {
@@ -1860,8 +1882,8 @@ main > *,
     }
 
     .avatar {
-        width: 4.4rem;
-        height: 4.4rem;
+        width: 5.5rem;
+        height: 5.5rem;
         border-width: 2px;
     }
 
@@ -1872,6 +1894,10 @@ main > *,
     }
 
     .bio {
+        padding: 0 0.85rem 0.85rem;
+    }
+
+    .profile-details {
         padding: 0 0.85rem 0.85rem;
     }
 

@@ -5,6 +5,7 @@ namespace Oannes;
 final class InteractionService
 {
     private ?array $storedInteractionsByObject = null;
+    private ?ObjectRepository $repo = null;
 
     public function __construct(
         private readonly FileStore $store,
@@ -84,7 +85,7 @@ final class InteractionService
     public function boostedObjectsByUser(string $uid, int $limit = 50): array
     {
         $objects = [];
-        $repo = new ObjectRepository($this->store);
+        $repo = $this->repo();
 
         foreach (glob($this->store->dataDir() . '/interactions/local/' . $uid . '/*.json') ?: [] as $file) {
             $activity = $this->readJsonFile($file);
@@ -120,7 +121,7 @@ final class InteractionService
 
         $followed = array_fill_keys($actorIds, true);
         $objects = [];
-        $repo = new ObjectRepository($this->store);
+        $repo = $this->repo();
 
         foreach (glob($this->store->dataDir() . '/interactions/remote/' . rawurlencode($uid) . '/*.json') ?: [] as $file) {
             $activity = $this->readJsonFile($file);
@@ -158,7 +159,7 @@ final class InteractionService
             return true;
         }
 
-        $repo = new ObjectRepository($this->store);
+        $repo = $this->repo();
         $object = $repo->findByIdOrAlias($objectId);
         $canonicalObjectId = $object !== null ? (ActivityPub::objectId($object) ?? $objectId) : $objectId;
 
@@ -191,7 +192,7 @@ final class InteractionService
             throw new \InvalidArgumentException('Usuario local desconocido.');
         }
 
-        $repo = new ObjectRepository($this->store);
+        $repo = $this->repo();
         $object = $repo->findByIdOrAlias($objectId);
         if ($object === null) {
             throw new \InvalidArgumentException('Mensaje no encontrado.');
@@ -243,7 +244,7 @@ final class InteractionService
             throw new \InvalidArgumentException('Interacción no válida.');
         }
 
-        $repo = new ObjectRepository($this->store);
+        $repo = $this->repo();
         $object = $repo->findByIdOrAlias($objectId);
         if ($object === null) {
             throw new \InvalidArgumentException('Mensaje no encontrado.');
@@ -449,5 +450,10 @@ final class InteractionService
         }
 
         return null;
+    }
+
+    private function repo(): ObjectRepository
+    {
+        return $this->repo ??= new ObjectRepository($this->store);
     }
 }

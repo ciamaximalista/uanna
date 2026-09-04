@@ -47,6 +47,10 @@ final class Router
             return;
         }
 
+        if ($this->throttleRepeatedNammuFetch($method)) {
+            return;
+        }
+
         $this->runOpportunisticMaintenance($route, $method);
 
         if ($this->users->all() === [] && $route !== 'setup') {
@@ -259,6 +263,23 @@ final class Router
             return;
         }
 
+        if ($route === 'not-found') {
+            header('Cache-Control: public, max-age=60');
+            Http::notFound();
+            return;
+        }
+
+        if ($route === 'gone-object') {
+            $id = is_string($_GET['id'] ?? null) ? $_GET['id'] : '';
+            header('Cache-Control: public, max-age=86400');
+            Http::gone([
+                '@context' => 'https://www.w3.org/ns/activitystreams',
+                'id' => $id,
+                'type' => 'Tombstone',
+            ]);
+            return;
+        }
+
         $this->html();
     }
 
@@ -302,11 +323,22 @@ final class Router
 
         $id = rtrim((string)$this->config['base_url'], '/') . '/' . $path;
 
-        if ($this->repo->findByIdOrAlias($id) !== null) {
+        if (preg_match('#^u/[a-zA-Z0-9_-]+/p/[^/]+$#', $path) === 1) {
+            if (is_file(Id::objectPath($this->store->dataDir(), $id))) {
+                $_GET['id'] = $id;
+                return '';
+            }
+
             $_GET['id'] = $id;
+            return 'gone-object';
         }
 
-        return '';
+        if ($this->repo->findByIdOrAlias($id) !== null) {
+            $_GET['id'] = $id;
+            return '';
+        }
+
+        return 'not-found';
     }
 
     private function favicon(): void
@@ -471,12 +503,17 @@ final class Router
             }
 
             if (Http::wantsActivityJson()) {
+                if ($this->serveCachedActivityObject($id)) {
+                    return;
+                }
+
                 $object = $this->repo->findByIdOrAlias($id);
                 if ($object === null || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
                     Http::notFound();
                     return;
                 }
 
+                $this->cacheActivityObject($id, $object);
                 Http::activityJson($object);
                 return;
             }
@@ -555,6 +592,94 @@ final class Router
                 ],
             ],
         ], 'application/jrd+json');
+    }
+
+    private function serveCachedActivityObject(string $id): bool
+    {
+        $path = $this->activityObjectCachePath($id);
+
+        if (!is_file($path) || time() - filemtime($path) > 300) {
+            return false;
+        }
+
+        $json = file_get_contents($path);
+        if (!is_string($json) || $json === '') {
+            return false;
+        }
+
+        Http::cachedActivityJson($json);
+        return true;
+    }
+
+    private function cacheActivityObject(string $id, array $object): void
+    {
+        $path = $this->activityObjectCachePath($id);
+        $dir = dirname($path);
+
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return;
+        }
+
+        @chmod($dir, 02775);
+        @file_put_contents($path, Json::encode($object), LOCK_EX);
+        @chmod($path, 0664);
+    }
+
+    private function activityObjectCachePath(string $id): string
+    {
+        return $this->store->dataDir() . '/cache/activity-objects/' . Id::digest($id) . '.json';
+    }
+
+    private function throttleRepeatedNammuFetch(string $method): bool
+    {
+        if ($method !== 'GET' && $method !== 'HEAD') {
+            return false;
+        }
+
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        if (!is_string($userAgent) || !str_contains($userAgent, 'Nammu Fediverso')) {
+            return false;
+        }
+
+        $path = parse_url(Http::requestTarget(), PHP_URL_PATH);
+        if (!is_string($path) || preg_match('#^/u/[a-zA-Z0-9_-]+/p/[^/]+$#', $path) !== 1) {
+            return false;
+        }
+
+        $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
+        $key = (is_string($remoteAddr) ? $remoteAddr : '') . ' ' . $path;
+        $counterPath = $this->store->dataDir() . '/cache/request-throttle/' . Id::digest($key) . '.json';
+        $now = time();
+        $state = ['window' => $now, 'count' => 0];
+
+        if (is_file($counterPath)) {
+            try {
+                $loaded = $this->store->readJson($counterPath);
+                if (is_int($loaded['window'] ?? null) && $now - $loaded['window'] < 60) {
+                    $state = [
+                        'window' => $loaded['window'],
+                        'count' => is_int($loaded['count'] ?? null) ? $loaded['count'] : 0,
+                    ];
+                }
+            } catch (\Throwable) {
+                $state = ['window' => $now, 'count' => 0];
+            }
+        }
+
+        $state['count']++;
+
+        try {
+            $this->store->writeJson($counterPath, $state);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        if ($state['count'] <= 30) {
+            return false;
+        }
+
+        Http::tooManyRequests(300);
+        return true;
     }
 
     private function nodeInfoLinks(): void
@@ -735,10 +860,7 @@ final class Router
 
         foreach ($this->users->all() as $uid => $_user) {
             if (is_string($uid)) {
-                $total += count($this->repo->byAnyActor(
-                    array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)),
-                    100000
-                ));
+                $total += $this->repo->countByAnyActor(array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)));
             }
         }
 
@@ -3423,22 +3545,38 @@ final class Router
     private function tagObjects(string $tag, int $offset, int $limit): array
     {
         $objects = [];
-        foreach ($this->repo->all() as $object) {
-            if (!is_array($object) || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
-                continue;
+        $fetchOffset = $offset;
+        $fetchLimit = $limit;
+
+        while (count($objects) < $limit) {
+            $batch = $this->repo->byTag($tag, $fetchLimit, $fetchOffset);
+            if ($batch === []) {
+                break;
             }
 
-            if ($this->objectHasTag($object, $tag)) {
+            foreach ($batch as $object) {
+                if (!is_array($object) || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
+                    continue;
+                }
+
                 $objects[] = $object;
+                if (count($objects) >= $limit) {
+                    break;
+                }
+            }
+
+            if (count($batch) < $fetchLimit) {
+                break;
+            }
+
+            $fetchOffset += $fetchLimit;
+            $fetchLimit = $limit - count($objects);
+            if ($fetchLimit <= 0) {
+                break;
             }
         }
 
-        usort($objects, static fn (array $a, array $b): int => strcmp(
-            (string)ActivityPub::published($b),
-            (string)ActivityPub::published($a)
-        ));
-
-        return array_slice($objects, $offset, $limit);
+        return $objects;
     }
 
     private function objectHasTag(array $object, string $tag): bool
@@ -3548,7 +3686,7 @@ final class Router
         );
         $objects = array_values(array_filter(
             $objects,
-            fn (array $object): bool => $this->objectVisibleInUserTimeline($uid, $object)
+            fn (array $object): bool => $this->objectVisibleInUserTimeline($uid, $object, $graph)
         ));
         $objects = $this->uniqueTimelineObjects($objects);
 
@@ -3674,7 +3812,7 @@ final class Router
         }
     }
 
-    private function objectVisibleInUserTimeline(string $uid, array $object): bool
+    private function objectVisibleInUserTimeline(string $uid, array $object, ?SocialGraph $graph = null): bool
     {
         if ($this->objectBlocked($object)) {
             return false;
@@ -3685,7 +3823,7 @@ final class Router
             return true;
         }
 
-        $graph = new SocialGraph($this->store);
+        $graph ??= new SocialGraph($this->store);
         if ($actor !== null && $graph->isFollowing($uid, $actor)) {
             return true;
         }

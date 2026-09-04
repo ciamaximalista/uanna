@@ -4,16 +4,23 @@ namespace Oannes;
 
 final class SocialRelationService
 {
+    private array $stateCache = [];
+
     public function __construct(private readonly FileStore $store)
     {
     }
 
     public function state(string $uid, string $actorId): array
     {
+        $key = $uid . "\n" . $actorId;
+        if (array_key_exists($key, $this->stateCache)) {
+            return $this->stateCache[$key];
+        }
+
         $path = $this->path($uid, $actorId);
 
         if (!is_file($path)) {
-            return [
+            return $this->stateCache[$key] = [
                 'actor' => $actorId,
                 'muted' => false,
                 'blocked' => false,
@@ -22,7 +29,7 @@ final class SocialRelationService
 
         $state = $this->store->readJson($path);
 
-        return [
+        return $this->stateCache[$key] = [
             'actor' => is_string($state['actor'] ?? null) ? $state['actor'] : $actorId,
             'muted' => (bool)($state['muted'] ?? false),
             'blocked' => (bool)($state['blocked'] ?? false),
@@ -37,6 +44,7 @@ final class SocialRelationService
         $state['muted'] = $muted;
         $state['updated_at'] = gmdate('c');
         $this->store->writeJson($this->path($uid, $actorId), $state);
+        $this->stateCache[$uid . "\n" . $actorId] = $state;
 
         return $state;
     }
@@ -48,6 +56,7 @@ final class SocialRelationService
         $state['blocked'] = $blocked;
         $state['updated_at'] = gmdate('c');
         $this->store->writeJson($this->path($uid, $actorId), $state);
+        $this->stateCache[$uid . "\n" . $actorId] = $state;
 
         return $state;
     }

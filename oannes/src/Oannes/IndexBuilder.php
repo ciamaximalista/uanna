@@ -24,7 +24,7 @@ final class IndexBuilder
                 continue;
             }
 
-            $objects[$id] = [
+            $meta = [
                 'id' => $id,
                 'type' => ActivityPub::objectType($object),
                 'path' => $this->relativePath($file),
@@ -33,6 +33,13 @@ final class IndexBuilder
                 'actor' => ActivityPub::attributedTo($object),
                 'inReplyTo' => ActivityPub::inReplyTo($object),
             ];
+
+            $tags = $this->tags($object);
+            if ($tags !== []) {
+                $meta['tags'] = $tags;
+            }
+
+            $objects[$id] = $meta;
 
             foreach (ActivityPub::aliases($object) as $alias) {
                 $aliases[$alias] = $id;
@@ -116,5 +123,47 @@ final class IndexBuilder
         }
 
         return ActivityPub::published($object);
+    }
+
+    private function tags(array $object): array
+    {
+        $tags = [];
+
+        foreach ((array)($object['tag'] ?? []) as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $name = $entry['name'] ?? '';
+            $type = $entry['type'] ?? '';
+            if (is_string($name) && ($type === 'Hashtag' || str_starts_with($name, '#'))) {
+                $tag = $this->normalizeTag($name);
+                if ($tag !== '') {
+                    $tags[$tag] = true;
+                }
+            }
+        }
+
+        foreach (['sourceContent', 'content', 'summary', 'name'] as $field) {
+            $value = $object[$field] ?? null;
+            if (!is_string($value) || $value === '') {
+                continue;
+            }
+
+            preg_match_all('/(?<![\p{L}\p{N}_&])#([\p{L}\p{N}_][\p{L}\p{N}_-]{0,63})(?![\p{L}\p{N}_-])/u', strip_tags($value), $matches);
+            foreach ($matches[1] ?? [] as $candidate) {
+                $tag = $this->normalizeTag((string)$candidate);
+                if ($tag !== '') {
+                    $tags[$tag] = true;
+                }
+            }
+        }
+
+        return array_keys($tags);
+    }
+
+    private function normalizeTag(string $tag): string
+    {
+        return mb_strtolower(trim(ltrim($tag, "# \t\n\r\0\x0B")));
     }
 }

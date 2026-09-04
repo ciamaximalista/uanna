@@ -8,6 +8,7 @@ final class ObjectRepository
     private ?array $aliases = null;
     private ?array $children = null;
     private ?array $byActor = null;
+    private ?array $sortedObjects = null;
 
     public function __construct(private readonly FileStore $store)
     {
@@ -46,14 +47,8 @@ final class ObjectRepository
 
     public function recent(int $limit = 50): array
     {
-        $items = array_values($this->objects());
-        usort($items, static fn (array $a, array $b): int => strcmp(
-            (string)($b['sort_date'] ?? $b['published'] ?? ''),
-            (string)($a['sort_date'] ?? $a['published'] ?? '')
-        ));
-
         $objects = [];
-        foreach (array_slice($items, 0, $limit) as $meta) {
+        foreach (array_slice($this->sortedObjects(), 0, $limit) as $meta) {
             if (!isset($meta['id']) || !is_string($meta['id'])) {
                 continue;
             }
@@ -79,17 +74,9 @@ final class ObjectRepository
 
     public function byAnyActor(array $actorIds, int $limit = 50): array
     {
-        $ids = [];
-        foreach ($actorIds as $actorId) {
-            if (is_string($actorId)) {
-                $ids = array_merge($ids, $this->byActorIndex()[$actorId] ?? []);
-            }
-        }
-
-        $ids = array_values(array_unique($ids));
         $metas = [];
 
-        foreach ($ids as $id) {
+        foreach ($this->idsByAnyActor($actorIds) as $id) {
             if (is_string($id) && isset($this->objects()[$id])) {
                 $metas[] = $this->objects()[$id];
             }
@@ -115,6 +102,48 @@ final class ObjectRepository
         return $objects;
     }
 
+    public function countByAnyActor(array $actorIds): int
+    {
+        return count($this->idsByAnyActor($actorIds));
+    }
+
+    public function byTag(string $tag, int $limit = 50, int $offset = 0): array
+    {
+        $tag = mb_strtolower(trim(ltrim($tag, "# \t\n\r\0\x0B")));
+        if ($tag === '') {
+            return [];
+        }
+
+        $objects = [];
+        $seen = 0;
+
+        foreach ($this->sortedObjects() as $meta) {
+            $tags = $meta['tags'] ?? [];
+            if (!is_array($tags) || !in_array($tag, $tags, true)) {
+                continue;
+            }
+
+            if ($seen++ < $offset) {
+                continue;
+            }
+
+            if (!isset($meta['id']) || !is_string($meta['id'])) {
+                continue;
+            }
+
+            $object = $this->findByIdOrAlias($meta['id']);
+            if ($object !== null) {
+                $objects[] = $object;
+            }
+
+            if (count($objects) >= $limit) {
+                break;
+            }
+        }
+
+        return $objects;
+    }
+
     private function objects(): array
     {
         return $this->objects ??= $this->index('objects');
@@ -133,6 +162,33 @@ final class ObjectRepository
     private function byActorIndex(): array
     {
         return $this->byActor ??= $this->index('by_actor');
+    }
+
+    private function sortedObjects(): array
+    {
+        if ($this->sortedObjects !== null) {
+            return $this->sortedObjects;
+        }
+
+        $items = array_values($this->objects());
+        usort($items, static fn (array $a, array $b): int => strcmp(
+            (string)($b['sort_date'] ?? $b['published'] ?? ''),
+            (string)($a['sort_date'] ?? $a['published'] ?? '')
+        ));
+
+        return $this->sortedObjects = $items;
+    }
+
+    private function idsByAnyActor(array $actorIds): array
+    {
+        $ids = [];
+        foreach ($actorIds as $actorId) {
+            if (is_string($actorId)) {
+                $ids = array_merge($ids, $this->byActorIndex()[$actorId] ?? []);
+            }
+        }
+
+        return array_values(array_unique($ids));
     }
 
     private function index(string $name): array

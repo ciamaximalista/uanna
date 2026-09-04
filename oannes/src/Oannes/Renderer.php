@@ -420,6 +420,85 @@ final class Renderer
         return '<p class="profile-followed-by"><span>' . Html::escape($this->t('profile.followed_by', 'Seguido por')) . '</span>' . $html . '</p>';
     }
 
+    private function profileFollowerGroups(string $uid, string $targetActorId, SocialGraph $graph): array
+    {
+        $internal = [];
+        $external = [];
+
+        foreach ($graph->followers($uid) as $actor) {
+            if (!is_array($actor)) {
+                continue;
+            }
+
+            $actorId = ActivityPub::objectId($actor);
+            if ($actorId === null) {
+                continue;
+            }
+
+            $localUid = $this->localUidForActor($actorId);
+            if ($localUid !== null) {
+                $internal[$this->users->actorId($localUid)] = $this->actorInfo($this->users->actorId($localUid));
+            } else {
+                $external[$actorId] = $this->actorInfo($actorId);
+            }
+        }
+
+        foreach ($this->users->all() as $localUid => $_user) {
+            if (!is_string($localUid) || $localUid === $uid) {
+                continue;
+            }
+
+            if ($graph->isFollowing($localUid, $targetActorId)) {
+                $internal[$this->users->actorId($localUid)] = $this->actorInfo($this->users->actorId($localUid));
+            }
+        }
+
+        return [$internal, $external];
+    }
+
+    private function profileFollowersByType(array $internal, array $external, array $following): string
+    {
+        return '<div class="profile-followers">'
+            . $this->profileFollowerLine($this->t('profile.followed_by_internal', 'Seguidores internos'), $internal)
+            . $this->profileFollowerLine($this->t('profile.followed_by_external', 'Seguidores externos'), $external)
+            . $this->profileFollowingAvatars($following)
+            . '</div>';
+    }
+
+    private function profileFollowerLine(string $label, array $actors): string
+    {
+        $html = $this->profileAvatarLinks($actors);
+        if ($html === '') {
+            $html = '<span class="muted">' . Html::escape($this->t('profile.no_followers', 'Nadie')) . '</span>';
+        }
+
+        return '<p class="profile-followed-by"><span>' . Html::escape($label) . '</span>' . $html . '</p>';
+    }
+
+    private function profileAvatarLinks(array $actors): string
+    {
+        $html = '';
+        foreach ($actors as $actorOrInfo) {
+            if (!is_array($actorOrInfo)) {
+                continue;
+            }
+
+            $info = isset($actorOrInfo['label']) || isset($actorOrInfo['internal_url'])
+                ? $actorOrInfo
+                : $this->actorInfo(ActivityPub::objectId($actorOrInfo) ?? '');
+            $url = Html::escape((string)($info['internal_url'] ?? $info['url'] ?? '#'));
+            $label = Html::escape((string)($info['label'] ?? ''));
+            $avatar = Html::escape((string)($info['avatar'] ?? ''));
+            $initial = Html::escape((string)($info['initial'] ?? '?'));
+            $avatarHtml = $avatar !== ''
+                ? '<img src="' . $avatar . '" alt=""/>'
+                : '<span class="followed-by-avatar avatar-fallback">' . $initial . '</span>';
+            $html .= '<a class="followed-by-avatar-link" href="' . $url . '" title="' . $label . '" aria-label="' . $label . '">' . $avatarHtml . '</a>';
+        }
+
+        return $html;
+    }
+
     private function localUidForActor(string $actorId): ?string
     {
         foreach ($this->users->all() as $uid => $_user) {
@@ -482,6 +561,64 @@ final class Renderer
         }
 
         return '<p class="profile-email"><a href="mailto:' . Html::escape($email) . '">' . Html::escape($email) . '</a></p>';
+    }
+
+    private function profileSocialData(string $uid, string $targetActorId): array
+    {
+        $graph = new SocialGraph(new FileStore($this->config['data_dir']));
+        $following = $this->uniqueActorsById($graph->following($uid));
+        [$internal, $external] = $this->profileFollowerGroups($uid, $targetActorId, $graph);
+
+        return [
+            'following' => $following,
+            'followers_internal' => $internal,
+            'followers_external' => $external,
+            'following_count' => count($following),
+            'followers_count' => count($internal) + count($external),
+        ];
+    }
+
+    private function profileSocialCounts(array $socialData): string
+    {
+        $followingCount = (int)($socialData['following_count'] ?? 0);
+        $followersCount = (int)($socialData['followers_count'] ?? 0);
+
+        return '<p class="profile-social-counts">'
+            . Html::escape('Sigue ' . $followingCount . ' ' . ($followingCount === 1 ? 'perfil' : 'perfiles'))
+            . '<span aria-hidden="true"> · </span>'
+            . Html::escape('es seguido por ' . $followersCount)
+            . '</p>';
+    }
+
+    private function profileFollowingAvatars(array $actors): string
+    {
+        $html = $this->profileAvatarLinks($actors);
+        if ($html === '') {
+            $html = '<span class="muted">' . Html::escape($this->t('profile.no_following', 'Nadie')) . '</span>';
+        }
+
+        return '<p class="profile-followed-by profile-following-avatars"><span>'
+            . Html::escape($this->t('profile.following', 'Sigue a'))
+            . '</span>'
+            . $html
+            . '</p>';
+    }
+
+    private function uniqueActorsById(array $actors): array
+    {
+        $unique = [];
+        foreach ($actors as $actor) {
+            if (!is_array($actor)) {
+                continue;
+            }
+
+            $actorId = ActivityPub::objectId($actor);
+            if ($actorId !== null) {
+                $unique[$actorId] = $actor;
+            }
+        }
+
+        return $unique;
     }
 
     private function anyActorBlockedByInstance(array $actorIds): bool
@@ -550,12 +687,15 @@ final class Renderer
         $headerStyle = $header !== '' ? ' style="background-image:url(\'' . $header . '\')"' : '';
         $profileActorId = $localUsers->actorId($uid);
         $profileActions = $this->profileSocialAction($profileActorId);
-        $followedByHtml = $this->followedByPeopleYouFollow($profileActorId);
+        $socialData = $this->profileSocialData($uid, $profileActorId);
+        $socialCountsHtml = $this->profileSocialCounts($socialData);
+        $followedByHtml = $this->profileFollowersByType($socialData['followers_internal'] ?? [], $socialData['followers_external'] ?? [], $socialData['following'] ?? []);
 
         $body = '<section class="profile hero-profile">'
             . '<div class="profile-cover"' . $headerStyle . '></div>'
-            . '<div class="profile-main">' . $avatarHtml . '<div><h1>' . $name . '</h1>'
-            . '<p class="meta">@' . Html::escape($uid) . '@' . $host . '</p>' . $followedByHtml . '</div>' . $profileActions . '</div>'
+            . '<div class="profile-main">' . $avatarHtml . '<div class="profile-title"><h1>' . $name . '</h1>'
+            . '<p class="meta">@' . Html::escape($uid) . '@' . $host . '</p></div>' . $profileActions . '</div>'
+            . '<div class="profile-details">' . $socialCountsHtml . $followedByHtml . '</div>'
             . ($bio !== '' ? '<p class="bio">' . nl2br($bio) . '</p>' : '')
             . $emailHtml
             . '</section><section class="timeline">' . $items . $this->timelineMore($nextUrl) . '</section>';

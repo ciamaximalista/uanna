@@ -4,6 +4,9 @@ namespace Oannes;
 
 final class SocialGraph
 {
+    private array $followersCache = [];
+    private array $followingCache = [];
+
     public function __construct(private readonly FileStore $store)
     {
     }
@@ -17,6 +20,7 @@ final class SocialGraph
         }
 
         $this->store->writeJson($this->path('followers', $uid, $id), $actor);
+        unset($this->followersCache[$uid]);
     }
 
     public function addFollowing(string $uid, array $actor): void
@@ -28,6 +32,7 @@ final class SocialGraph
         }
 
         $this->store->writeJson($this->path('following', $uid, $id), $actor);
+        unset($this->followingCache[$uid]);
     }
 
     public function isFollowing(string $uid, string $actorId): bool
@@ -65,6 +70,8 @@ final class SocialGraph
                 }
             }
         }
+
+        unset($this->followingCache[$uid]);
     }
 
     public function updateActorCopies(array $actor): int
@@ -92,17 +99,20 @@ final class SocialGraph
             $updated++;
         }
 
+        $this->followersCache = [];
+        $this->followingCache = [];
+
         return $updated;
     }
 
     public function followers(string $uid): array
     {
-        return $this->readActors('followers', $uid);
+        return $this->followersCache[$uid] ??= $this->readActors('followers', $uid);
     }
 
     public function following(string $uid): array
     {
-        return $this->readActors('following', $uid);
+        return $this->followingCache[$uid] ??= $this->readActors('following', $uid);
     }
 
     public function followerInboxes(string $uid): array
