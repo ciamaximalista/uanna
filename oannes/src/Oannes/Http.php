@@ -47,6 +47,11 @@ final class Http
         self::json(['error' => 'not_found'], 'application/json', 404);
     }
 
+    public static function forbidden(): void
+    {
+        self::json(['error' => 'forbidden'], 'application/json', 403);
+    }
+
     public static function gone(array $data = []): void
     {
         header('Retry-After: 86400');

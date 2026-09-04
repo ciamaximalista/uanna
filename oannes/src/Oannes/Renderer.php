@@ -646,12 +646,13 @@ final class Renderer
         return $this->page('', '<section class="timeline">' . $this->instancePresentationCard($settings) . $timeline . $this->timelineMore($nextUrl) . '</section>');
     }
 
-    public function privateTimelinePage(string $uid, array $objects, string $csrf, string $nextUrl = ''): string
+    public function privateTimelinePage(string $uid, array $objects, string $csrf, string $nextUrl = '', bool $isAdmin = false): string
     {
         $items = $objects !== []
             ? $this->objectList($objects, false, [
                 'actions' => [
                     'uid' => $uid,
+                    'is_admin' => $isAdmin,
                     'csrf' => $csrf,
                 ],
             ])

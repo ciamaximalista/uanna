@@ -113,6 +113,11 @@ final class Router
             return;
         }
 
+        if (preg_match('#^u/([^/]+)/p/([^/]+)/replies$#', $route, $match)) {
+            $this->repliesCollection($match[1], $match[2]);
+            return;
+        }
+
         if (preg_match('#^u/([^/]+)/(followers|following)$#', $route, $match)) {
             $this->socialCollection($match[1], $match[2]);
             return;
@@ -306,6 +311,10 @@ final class Router
         }
 
         if (preg_match('#^u/[a-zA-Z0-9_-]+(?:/(?:outbox|inbox|followers|following))?$#', $path)) {
+            return $path;
+        }
+
+        if (preg_match('#^u/[a-zA-Z0-9_-]+/p/[^/]+/replies$#', $path)) {
             return $path;
         }
 
@@ -513,6 +522,7 @@ final class Router
                     return;
                 }
 
+                $object = $this->withPublicRepliesCollection($object);
                 $this->cacheActivityObject($id, $object);
                 Http::activityJson($object);
                 return;
@@ -546,7 +556,14 @@ final class Router
             $hasMore = count($objects) > $pageSize;
             $objects = array_slice($objects, 0, $pageSize);
             $nextUrl = $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'private', 'offset' => $pageSize]) : '';
-            echo $this->renderer->privateTimelinePage($currentUid, $objects, $auth->csrfToken(), $nextUrl);
+            $currentUser = $this->users->find($currentUid);
+            echo $this->renderer->privateTimelinePage(
+                $currentUid,
+                $objects,
+                $auth->csrfToken(),
+                $nextUrl,
+                is_array($currentUser) && (bool)($currentUser['admin'] ?? false)
+            );
             return;
         }
 
@@ -628,6 +645,58 @@ final class Router
     private function activityObjectCachePath(string $id): string
     {
         return $this->store->dataDir() . '/cache/activity-objects/' . Id::digest($id) . '.json';
+    }
+
+    private function withPublicRepliesCollection(array $object): array
+    {
+        $id = ActivityPub::objectId($object);
+        if ($id === null || !$this->isLocalActorObject($object)) {
+            return $object;
+        }
+
+        $items = $this->publicReplyItems($id);
+        $collectionId = $id . '/replies';
+        $object['replies'] = [
+            'id' => $collectionId,
+            'type' => 'OrderedCollection',
+            'totalItems' => count($items),
+            'first' => [
+                'id' => $collectionId . '?page=true',
+                'type' => 'OrderedCollectionPage',
+                'partOf' => $collectionId,
+                'items' => $items,
+                'orderedItems' => $items,
+            ],
+        ];
+
+        return $object;
+    }
+
+    private function publicReplyItems(string $objectId): array
+    {
+        $items = [];
+
+        foreach ($this->repo->childrenOf($objectId) as $child) {
+            if (!ActivityPub::isPublicObject($child) || $this->objectBlocked($child)) {
+                continue;
+            }
+
+            $items[] = $this->withPublicRepliesCollection($child);
+        }
+
+        usort($items, static fn (array $a, array $b): int => strcmp(
+            ActivityPub::published($a),
+            ActivityPub::published($b)
+        ));
+
+        return $items;
+    }
+
+    private function isLocalActorObject(array $object): bool
+    {
+        $actor = ActivityPub::attributedTo($object);
+
+        return $actor !== null && $this->isLocalActorId($actor);
     }
 
     private function throttleRepeatedNammuFetch(string $method): bool
@@ -854,6 +923,58 @@ final class Router
             'type' => 'OrderedCollection',
             'totalItems' => count($actors),
             'orderedItems' => $items,
+        ]);
+    }
+
+    private function repliesCollection(string $uid, string $postId): void
+    {
+        if ($this->users->find($uid) === null) {
+            Http::notFound();
+            return;
+        }
+
+        $objectId = rtrim((string)$this->config['base_url'], '/') . '/u/' . rawurlencode($uid) . '/p/' . $postId;
+        $object = $this->repo->findByIdOrAlias($objectId);
+        $actor = is_array($object) ? ActivityPub::attributedTo($object) : null;
+
+        if ($object === null || $actor === null || !in_array($actor, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true)) {
+            Http::notFound();
+            return;
+        }
+
+        if (!ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
+            Http::notFound();
+            return;
+        }
+
+        $items = $this->publicReplyItems($objectId);
+        $collectionId = $objectId . '/replies';
+        $isPage = (string)($_GET['page'] ?? '') === 'true';
+
+        if ($isPage) {
+            Http::activityJson([
+                '@context' => 'https://www.w3.org/ns/activitystreams',
+                'id' => $collectionId . '?page=true',
+                'type' => 'OrderedCollectionPage',
+                'partOf' => $collectionId,
+                'items' => $items,
+                'orderedItems' => $items,
+            ]);
+            return;
+        }
+
+        Http::activityJson([
+            '@context' => 'https://www.w3.org/ns/activitystreams',
+            'id' => $collectionId,
+            'type' => 'OrderedCollection',
+            'totalItems' => count($items),
+            'first' => [
+                'id' => $collectionId . '?page=true',
+                'type' => 'OrderedCollectionPage',
+                'partOf' => $collectionId,
+                'items' => $items,
+                'orderedItems' => $items,
+            ],
         ]);
     }
 
@@ -2775,6 +2896,7 @@ final class Router
         $timelineSearchScope = $timelineSearchQuery !== '' ? $this->privateTimeline($uid, $this->timelineSearchLimit()) : [];
         $timelineSearchActions = [
             'uid' => $uid,
+            'is_admin' => is_array($this->users->find($uid)) && (bool)($this->users->find($uid)['admin'] ?? false),
             'csrf' => $auth->csrfToken(),
         ];
         $timelineSearchResults = $timelineSearchQuery !== ''
@@ -2891,6 +3013,7 @@ final class Router
             Http::json([
                 'html' => $this->renderer->timelineChunk($objects, [
                     'uid' => $uid,
+                    'is_admin' => is_array($this->users->find($uid)) && (bool)($this->users->find($uid)['admin'] ?? false),
                     'csrf' => $auth->csrfToken(),
                 ]),
                 'next' => $hasMore ? $this->publicUrl(['route' => 'timeline-more', 'scope' => 'private', 'offset' => $offset + $limit]) : '',
@@ -3037,8 +3160,8 @@ final class Router
                 'POST ?route=api/reply',
                 'POST ?route=api/follow',
                 'POST ?route=api/unfollow',
-                'GET ?route=api/following&limit=20&offset=0',
-                'GET ?route=api/followers&limit=20&offset=0',
+                'GET ?route=api/following&user=david&limit=20&offset=0',
+                'GET ?route=api/followers&user=david&limit=20&offset=0',
                 'GET ?route=api/reaction&id=https://...',
                 'POST ?route=api/reaction',
                 'DELETE ?route=api/reaction&id=https://...&type=Like|Announce',
@@ -3206,8 +3329,22 @@ final class Router
             return;
         }
 
+        $targetUid = is_string($_GET['user'] ?? null) && trim((string)$_GET['user']) !== ''
+            ? trim((string)$_GET['user'])
+            : $uid;
+
+        if ($this->users->find($targetUid) === null) {
+            Http::notFound();
+            return;
+        }
+
         $graph = new SocialGraph($this->store);
-        $actors = $kind === 'followers' ? $graph->followers($uid) : $graph->following($uid);
+        if (!$this->apiCanReadSocialCollection($uid, $targetUid, $graph)) {
+            Http::forbidden();
+            return;
+        }
+
+        $actors = $kind === 'followers' ? $graph->followers($targetUid) : $graph->following($targetUid);
         $actorIds = [];
 
         foreach ($actors as $actor) {
@@ -3226,11 +3363,32 @@ final class Router
 
         Http::json([
             'collection' => $kind,
+            'user' => $targetUid,
             'total' => count($actorIds),
             'limit' => $limit,
             'offset' => $offset,
             'items' => array_map(fn (string $actorId): array => $this->apiActor($actorId), $pageIds),
         ]);
+    }
+
+    private function apiCanReadSocialCollection(string $uid, string $targetUid, SocialGraph $graph): bool
+    {
+        if ($uid === $targetUid || (bool)($this->config['expose_social_graph'] ?? false)) {
+            return true;
+        }
+
+        $user = $this->users->find($uid);
+        if (is_array($user) && (bool)($user['admin'] ?? false)) {
+            return true;
+        }
+
+        foreach (array_merge([$this->users->actorId($targetUid)], $this->users->legacyActorIds($targetUid)) as $actorId) {
+            if ($graph->isFollowing($uid, $actorId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function apiResolveActorInput(array $input): string
