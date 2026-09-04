@@ -753,8 +753,11 @@ final class Router
             return null;
         }
 
+        $user = $this->users->find($uid);
+
         return [
             'uid' => $uid,
+            'is_admin' => is_array($user) && (bool)($user['admin'] ?? false),
             'csrf' => $auth->csrfToken(),
         ];
     }
@@ -1481,13 +1484,24 @@ final class Router
         }
 
         try {
+            $deleteUid = $uid;
+            $note = $this->repo->findByIdOrAlias($id);
+            $actor = is_array($note) ? ActivityPub::attributedTo($note) : null;
+            $ownerUid = $actor !== null ? $this->localUidForActorId($actor) : null;
+            $currentUser = $this->users->find($uid);
+            $isInstanceAdmin = is_array($currentUser) && (bool)($currentUser['admin'] ?? false);
+
+            if ($ownerUid !== null && $ownerUid !== $uid && $isInstanceAdmin) {
+                $deleteUid = $ownerUid;
+            }
+
             (new PostService(
                 $this->store,
                 $this->users,
                 new FileQueue($this->store),
                 new SocialGraph($this->store),
                 $this->config,
-            ))->deleteNote($uid, $id);
+            ))->deleteNote($deleteUid, $id);
         } catch (\Throwable $e) {
             echo $this->adminDashboard($uid, $auth, null, $e->getMessage());
             return;
@@ -2980,6 +2994,16 @@ final class Router
                 return;
             }
 
+            if ($path === 'followers') {
+                $this->apiSocialCollection($uid, $method, 'followers');
+                return;
+            }
+
+            if ($path === 'following') {
+                $this->apiSocialCollection($uid, $method, 'following');
+                return;
+            }
+
             if ($path === 'reaction') {
                 $this->apiReaction($uid, $method);
                 return;
@@ -3013,6 +3037,8 @@ final class Router
                 'POST ?route=api/reply',
                 'POST ?route=api/follow',
                 'POST ?route=api/unfollow',
+                'GET ?route=api/following&limit=20&offset=0',
+                'GET ?route=api/followers&limit=20&offset=0',
                 'GET ?route=api/reaction&id=https://...',
                 'POST ?route=api/reaction',
                 'DELETE ?route=api/reaction&id=https://...&type=Like|Announce',
@@ -3170,6 +3196,40 @@ final class Router
             'following' => false,
             'was_following' => $wasFollowing,
             'message' => $message,
+        ]);
+    }
+
+    private function apiSocialCollection(string $uid, string $method, string $kind): void
+    {
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $graph = new SocialGraph($this->store);
+        $actors = $kind === 'followers' ? $graph->followers($uid) : $graph->following($uid);
+        $actorIds = [];
+
+        foreach ($actors as $actor) {
+            $actorId = ActivityPub::objectId($actor);
+            if ($actorId !== null) {
+                $actorIds[] = $actorId;
+            }
+        }
+
+        $actorIds = array_values(array_unique($actorIds));
+        sort($actorIds, SORT_STRING);
+
+        $limit = $this->apiLimit();
+        $offset = $this->apiOffset();
+        $pageIds = array_slice($actorIds, $offset, $limit);
+
+        Http::json([
+            'collection' => $kind,
+            'total' => count($actorIds),
+            'limit' => $limit,
+            'offset' => $offset,
+            'items' => array_map(fn (string $actorId): array => $this->apiActor($actorId), $pageIds),
         ]);
     }
 

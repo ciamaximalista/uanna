@@ -982,8 +982,20 @@ h3 {
     max-width: 100%;
 }
 
+.reply-tree .reply-tree {
+    margin-left: calc(-1 * clamp(0.7rem, 3vw, 1.2rem));
+    padding-left: 0;
+    border-left: 0;
+}
+
 .reply-tree .object {
     box-shadow: none;
+}
+
+.reply-tree .reply-tree .object.child {
+    margin-left: 0;
+    border-left: 2px solid rgba(122, 199, 183, 0.26);
+    padding-left: 0.9rem;
 }
 
 .content img,
@@ -1983,11 +1995,20 @@ main > *,
     }
 
     .reply-tree {
+        margin-top: 0.85rem;
         padding-left: 0.55rem;
+        border-left-color: rgba(122, 199, 183, 0.45);
     }
 
     .reply-tree .reply-tree {
-        padding-left: 0.35rem;
+        margin-left: -0.55rem;
+        padding-left: 0;
+        border-left: 0;
+    }
+
+    .reply-tree .reply-tree .object.child {
+        border-left: 2px solid rgba(122, 199, 183, 0.28);
+        padding-left: 0.65rem;
     }
 
     .post-stats,

@@ -1349,13 +1349,17 @@ final class Renderer
         }
 
         $uid = (string)($actions['uid'] ?? '');
+        $isAdmin = (bool)($actions['is_admin'] ?? false);
         $id = ActivityPub::objectId($object) ?? '';
         if ($uid === '' || $id === '') {
             return '';
         }
 
         $actor = ActivityPub::attributedTo($object) ?? '';
-        if (!in_array($actor, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true)) {
+        $isOwnPost = in_array($actor, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true);
+        $isLocalPost = $this->localUidForActorId($actor) !== null;
+
+        if (!$isOwnPost && (!$isAdmin || !$isLocalPost)) {
             return '';
         }
 
@@ -1365,22 +1369,28 @@ final class Renderer
         $source = Html::escape((string)($object['sourceContent'] ?? strip_tags((string)($object['content'] ?? ''))));
         $attachments = $this->imageAttachments($object);
         $altText = Html::escape($this->attachmentAltLines($attachments));
+        $editAction = $isOwnPost
+            ? '<a class="button-link secondary" href="#edit-' . $suffix . '">' . Html::escape($this->t('actions.edit', 'Editar')) . '</a>'
+            : '';
+        $editModal = $isOwnPost
+            ? '<section id="edit-' . $suffix . '" class="modal-overlay" aria-label="' . Html::escape($this->t('post.edit', 'Editar publicación')) . '">'
+                . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '"></a>'
+                . '<article class="compose-modal"><header><h2>' . Html::escape($this->t('actions.edit', 'Editar')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '">×</a></header>'
+                . '<form method="post" action="?route=admin/post-edit" enctype="multipart/form-data">'
+                . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
+                . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
+                . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required>' . $source . '</textarea></label>'
+                . $this->postImageInputs($attachments)
+                . '<label>' . Html::escape($this->t('field.alt_texts', 'Textos alt, uno por línea')) . ' <textarea name="image_alt" rows="4">' . $altText . '</textarea></label>'
+                . '<div class="modal-actions"><button type="submit">' . Html::escape($this->t('actions.send', 'Enviar')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '</a></div>'
+                . '</form></article></section>'
+            : '';
 
         return '<div class="own-post-actions">'
-            . '<a class="button-link secondary" href="#edit-' . $suffix . '">' . Html::escape($this->t('actions.edit', 'Editar')) . '</a>'
+            . $editAction
             . '<a class="button-link secondary danger-link" href="#delete-' . $suffix . '">' . Html::escape($this->t('actions.delete', 'Borrar')) . '</a>'
             . '</div>'
-            . '<section id="edit-' . $suffix . '" class="modal-overlay" aria-label="' . Html::escape($this->t('post.edit', 'Editar publicación')) . '">'
-            . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '"></a>'
-            . '<article class="compose-modal"><header><h2>' . Html::escape($this->t('actions.edit', 'Editar')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '">×</a></header>'
-            . '<form method="post" action="?route=admin/post-edit" enctype="multipart/form-data">'
-            . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
-            . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
-            . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required>' . $source . '</textarea></label>'
-            . $this->postImageInputs($attachments)
-            . '<label>' . Html::escape($this->t('field.alt_texts', 'Textos alt, uno por línea')) . ' <textarea name="image_alt" rows="4">' . $altText . '</textarea></label>'
-            . '<div class="modal-actions"><button type="submit">' . Html::escape($this->t('actions.send', 'Enviar')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '</a></div>'
-            . '</form></article></section>'
+            . $editModal
             . '<section id="delete-' . $suffix . '" class="modal-overlay" aria-label="' . Html::escape($this->t('post.delete', 'Borrar publicación')) . '">'
             . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.no', 'No')) . '"></a>'
             . '<article class="compose-modal"><header><h2>' . Html::escape($this->t('actions.delete', 'Borrar')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.no', 'No')) . '">×</a></header>'
@@ -2036,6 +2046,19 @@ final class Renderer
 
         foreach ($this->actors->findByPreferredUsername($username, $host) ?? [] as $actor) {
             return $this->actorUrl($actor, ActivityPub::objectId($actor) ?? '');
+        }
+
+        return null;
+    }
+
+    private function localUidForActorId(string $actorId): ?string
+    {
+        foreach ($this->users->all() as $uid => $_user) {
+            $uid = (string)$uid;
+            $ids = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
+            if (in_array($actorId, $ids, true)) {
+                return $uid;
+            }
         }
 
         return null;
