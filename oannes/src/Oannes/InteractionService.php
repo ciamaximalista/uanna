@@ -90,7 +90,7 @@ final class InteractionService
         foreach (glob($this->store->dataDir() . '/interactions/local/' . $uid . '/*.json') ?: [] as $file) {
             $activity = $this->readJsonFile($file);
 
-            if (($activity['type'] ?? null) !== 'Announce' || !is_string($activity['object'] ?? null)) {
+            if (($activity['type'] ?? null) !== 'Announce' || !is_string($activity['object'] ?? null) || $this->isReplyMentionAnnounce($activity)) {
                 continue;
             }
 
@@ -127,7 +127,7 @@ final class InteractionService
             $activity = $this->readJsonFile($file);
             $actor = $activity['actor'] ?? null;
 
-            if (($activity['type'] ?? null) !== 'Announce' || !is_string($activity['object'] ?? null) || !is_string($actor) || !isset($followed[$actor]) || $this->actorBlocked($actor)) {
+            if (($activity['type'] ?? null) !== 'Announce' || !is_string($activity['object'] ?? null) || $this->isReplyMentionAnnounce($activity) || !is_string($actor) || !isset($followed[$actor]) || $this->actorBlocked($actor)) {
                 continue;
             }
 

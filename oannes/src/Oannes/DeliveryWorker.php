@@ -56,10 +56,17 @@ final class DeliveryWorker
                 }
             } catch (\Throwable $e) {
                 if ($e instanceof IndeterminateDeliveryException) {
+                    $attempts = ((int)($claimed['attempts'] ?? 0)) + 1;
+                    $maxAttempts = (int)($this->config['delivery_max_attempts'] ?? 8);
                     $claimed['delivery_uncertain'] = true;
-                    $claimed['last_error'] = $e->getMessage();
-                    $this->queue->complete($claimed);
-                    $stats['skipped']++;
+
+                    if ($attempts >= $maxAttempts) {
+                        $this->queue->dead($claimed, $e->getMessage());
+                        $stats['dead']++;
+                    } else {
+                        $this->queue->fail($claimed, $e->getMessage(), $this->retrySeconds($attempts));
+                        $stats['failed']++;
+                    }
                     continue;
                 }
 

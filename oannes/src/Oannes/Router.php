@@ -79,12 +79,17 @@ final class Router
         }
 
         if (preg_match('#^u/([^/]+)$#', $route, $match)) {
-            $this->actor($match[1]);
+            $this->actor($match[1], true);
             return;
         }
 
         if (preg_match('#^legacy-user/([^/]+)$#', $route, $match)) {
             $this->actor($match[1]);
+            return;
+        }
+
+        if (preg_match('#^legacy-actor/([^/]+)$#', $route, $match)) {
+            $this->actor($match[1], true);
             return;
         }
 
@@ -327,7 +332,7 @@ final class Router
         }
 
         if (preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $path) && $this->users->find($path) !== null) {
-            return 'legacy-user/' . $path;
+            return 'legacy-actor/' . $path;
         }
 
         $id = rtrim((string)$this->config['base_url'], '/') . '/' . $path;
@@ -681,7 +686,7 @@ final class Router
                 continue;
             }
 
-            $items[] = $this->withPublicRepliesCollection($child);
+            $items[] = $this->withPublicRepliesSummary($child);
         }
 
         usort($items, static fn (array $a, array $b): int => strcmp(
@@ -690,6 +695,35 @@ final class Router
         ));
 
         return $items;
+    }
+
+    private function withPublicRepliesSummary(array $object): array
+    {
+        $id = ActivityPub::objectId($object);
+        if ($id === null || !$this->isLocalActorObject($object)) {
+            return $object;
+        }
+
+        $replyCount = 0;
+        foreach ($this->repo->childrenOf($id) as $child) {
+            if (ActivityPub::isPublicObject($child) && !$this->objectBlocked($child)) {
+                $replyCount++;
+            }
+        }
+
+        $collectionId = $id . '/replies';
+        $object['replies'] = [
+            'id' => $collectionId,
+            'type' => 'OrderedCollection',
+            'totalItems' => $replyCount,
+            'first' => [
+                'id' => $collectionId . '?page=true',
+                'type' => 'OrderedCollectionPage',
+                'partOf' => $collectionId,
+            ],
+        ];
+
+        return $object;
     }
 
     private function isLocalActorObject(array $object): bool
@@ -711,12 +745,28 @@ final class Router
         }
 
         $path = parse_url(Http::requestTarget(), PHP_URL_PATH);
-        if (!is_string($path) || preg_match('#^/u/[a-zA-Z0-9_-]+/p/[^/]+$#', $path) !== 1) {
+        if (!is_string($path) || preg_match('#^/u/[a-zA-Z0-9_-]+/p/[^/]+(?:/replies)?$#', $path) !== 1) {
             return false;
         }
 
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
-        $key = (is_string($remoteAddr) ? $remoteAddr : '') . ' ' . $path;
+        $addr = is_string($remoteAddr) ? $remoteAddr : '';
+
+        if ($this->incrementThrottleCount('nammu-global ' . $addr) > 90) {
+            Http::tooManyRequests(300);
+            return true;
+        }
+
+        if ($this->incrementThrottleCount('nammu-path ' . $addr . ' ' . $path) <= 30) {
+            return false;
+        }
+
+        Http::tooManyRequests(300);
+        return true;
+    }
+
+    private function incrementThrottleCount(string $key): int
+    {
         $counterPath = $this->store->dataDir() . '/cache/request-throttle/' . Id::digest($key) . '.json';
         $now = time();
         $state = ['window' => $now, 'count' => 0];
@@ -740,15 +790,10 @@ final class Router
         try {
             $this->store->writeJson($counterPath, $state);
         } catch (\Throwable) {
-            return false;
+            return 0;
         }
 
-        if ($state['count'] <= 30) {
-            return false;
-        }
-
-        Http::tooManyRequests(300);
-        return true;
+        return $state['count'];
     }
 
     private function nodeInfoLinks(): void
@@ -796,7 +841,7 @@ final class Router
         ]);
     }
 
-    private function actor(string $uid): void
+    private function actor(string $uid, bool $forceActivityJson = false): void
     {
         $user = $this->users->find($uid);
 
@@ -805,7 +850,7 @@ final class Router
             return;
         }
 
-        if (Http::wantsActivityJson()) {
+        if ($forceActivityJson || Http::wantsActivityJson()) {
             Http::activityJson($this->users->activityPubActor($uid, $user));
             return;
         }
@@ -2727,13 +2772,24 @@ final class Router
     private function followActor(string $uid, string $actorId, SocialGraph $graph): string
     {
         if ($graph->isFollowing($uid, $actorId)) {
+            if ($this->queueFollowDelivery($uid, $actorId, $this->actorForSocialAction($uid, $actorId))) {
+                return 'Ya sigues a ese usuario. Se ha reenviado el Follow federado.';
+            }
+
             return 'Ya sigues a ese usuario.';
         }
 
         $actor = $this->actorForSocialAction($uid, $actorId);
         $graph->addFollowing($uid, $actor);
 
-        $inbox = $graph->inboxForActor($actor);
+        $this->queueFollowDelivery($uid, $actorId, $actor);
+
+        return 'Usuario añadido a seguidos.';
+    }
+
+    private function queueFollowDelivery(string $uid, string $actorId, array $actor): bool
+    {
+        $inbox = (new SocialGraph($this->store))->inboxForActor($actor);
         if ($inbox !== null && !$this->isLocalActorId($actorId)) {
             $localActor = $this->users->actorId($uid);
             $activity = [
@@ -2751,9 +2807,11 @@ final class Router
                 'inbox' => $inbox,
                 'activity' => $activity,
             ]);
+
+            return true;
         }
 
-        return 'Usuario añadido a seguidos.';
+        return false;
     }
 
     private function unfollowActor(string $uid, string $actorId, SocialGraph $graph): string

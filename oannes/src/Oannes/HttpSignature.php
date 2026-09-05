@@ -47,13 +47,16 @@ final class HttpSignature
             throw new RuntimeException('Cannot sign HTTP request');
         }
 
+        $signatureHeader = 'keyId="' . $this->escape($keyId) . '",algorithm="rsa-sha256",headers="' . $signedHeaders . '",signature="' . base64_encode($signature) . '"';
+
         return [
             'Host' => $host,
             'Date' => $date,
             'Digest' => $digest,
             'Content-Type' => 'application/activity+json',
             'Accept' => 'application/activity+json',
-            'Signature' => 'keyId="' . $this->escape($keyId) . '",algorithm="rsa-sha256",headers="' . $signedHeaders . '",signature="' . base64_encode($signature) . '"',
+            'Signature' => $signatureHeader,
+            'Authorization' => 'Signature ' . $signatureHeader,
         ];
     }
 
@@ -95,11 +98,14 @@ final class HttpSignature
             throw new RuntimeException('Cannot sign HTTP request');
         }
 
+        $signatureHeader = 'keyId="' . $this->escape($keyId) . '",algorithm="rsa-sha256",headers="' . $signedHeaders . '",signature="' . base64_encode($signature) . '"';
+
         return [
             'Host' => $host,
             'Date' => $date,
             'Accept' => $accept,
-            'Signature' => 'keyId="' . $this->escape($keyId) . '",algorithm="rsa-sha256",headers="' . $signedHeaders . '",signature="' . base64_encode($signature) . '"',
+            'Signature' => $signatureHeader,
+            'Authorization' => 'Signature ' . $signatureHeader,
         ];
     }
 
@@ -124,7 +130,7 @@ final class HttpSignature
             }
         }
 
-        $signatureHeader = $normalized['signature'] ?? null;
+        $signatureHeader = $this->signatureHeader($normalized);
 
         if (!is_string($signatureHeader)) {
             return false;
@@ -170,7 +176,7 @@ final class HttpSignature
 
     public function keyId(array $headers): ?string
     {
-        $signatureHeader = $headers['signature'] ?? $headers['Signature'] ?? null;
+        $signatureHeader = $this->signatureHeader($headers);
 
         if (!is_string($signatureHeader)) {
             return null;
@@ -184,7 +190,7 @@ final class HttpSignature
 
     public function signedHeaderNames(array $headers): array
     {
-        $signatureHeader = $headers['signature'] ?? $headers['Signature'] ?? null;
+        $signatureHeader = $this->signatureHeader($headers);
 
         if (!is_string($signatureHeader)) {
             return [];
@@ -218,6 +224,26 @@ final class HttpSignature
     private function escape(string $value): string
     {
         return addcslashes($value, "\\\"");
+    }
+
+    private function signatureHeader(array $headers): ?string
+    {
+        $signatureHeader = $headers['signature'] ?? $headers['Signature'] ?? null;
+        if (is_string($signatureHeader) && $signatureHeader !== '') {
+            return $signatureHeader;
+        }
+
+        $authorization = $headers['authorization'] ?? $headers['Authorization'] ?? null;
+        if (!is_string($authorization)) {
+            return null;
+        }
+
+        $authorization = trim($authorization);
+        if (stripos($authorization, 'Signature ') === 0) {
+            return trim(substr($authorization, 10));
+        }
+
+        return null;
     }
 
     /**

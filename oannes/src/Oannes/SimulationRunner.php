@@ -835,18 +835,23 @@ final class SimulationRunner
         ]);
 
         (new InboxWorker($env['store'], $env['queue'], $env['config']))->run(10);
-        $counts = (new InteractionService(
+        $graph = new SocialGraph($env['store']);
+        $graph->addFollowing('ana', $env['remote']);
+        $interactions = new InteractionService(
             $env['store'],
             new LocalUsers($env['store'], $env['config']),
             $env['queue'],
-            new SocialGraph($env['store']),
+            $graph,
             new ActorRepository($env['store']),
             $env['config'],
-        ))->counts($object);
+        );
+        $counts = $interactions->counts($object);
+        $boosts = $interactions->remoteBoostedObjectsForUser('ana', [$env['remote_actor']], 10);
         $notifyRoot = $env['store']->dataDir();
         $notify = $env['store']->readJson($notifyRoot . '/users/ana/notify/' . Id::digest('Webmention:' . $sourceUrl . ':' . $object['id']) . '.json');
 
         $this->check('reply announce does not count as boost', ($counts['boosts'] ?? 0) === 0);
+        $this->check('reply announce does not enter boost feed', $boosts === []);
         $this->check('reply announce becomes webmention', ($notify['type'] ?? null) === 'Webmention' && ($notify['actor'] ?? null) === $sourceUrl);
     }
 
