@@ -976,14 +976,24 @@ h3 {
 
 .reply-tree {
     margin-top: 1rem;
-    padding-left: 0.55rem;
+    padding-left: 0.85rem;
     border-left: 2px solid var(--border);
     min-width: 0;
     max-width: 100%;
 }
 
+.reply-tree .object.child {
+    margin-left: 0;
+}
+
 .reply-tree .object {
     box-shadow: none;
+}
+
+.reply-branch + .reply-branch {
+    margin-top: 1.15rem;
+    padding-top: 1.15rem;
+    border-top: 1px dotted rgba(190, 196, 199, 0.46);
 }
 
 .content img,
@@ -1984,7 +1994,7 @@ main > *,
 
     .reply-tree {
         margin-top: 0.85rem;
-        padding-left: 0.32rem;
+        padding-left: 0.58rem;
         border-left-color: rgba(122, 199, 183, 0.45);
     }
 

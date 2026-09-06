@@ -1440,15 +1440,39 @@ final class Renderer
         $html = '<div class="reply-tree">';
 
         foreach ($children as $node) {
-            if (is_array($node['object'] ?? null)) {
-                $html .= $this->objectCard($node['object'], true, [
-                    'children' => $node['children'] ?? [],
-                    'actions' => $actions,
-                ]);
-            }
+            $html .= $this->replyBranchHtml($node, $actions);
         }
 
         return $html . '</div>';
+    }
+
+    private function replyBranchHtml(array $node, ?array $actions): string
+    {
+        if (!is_array($node['object'] ?? null)) {
+            return '';
+        }
+
+        return '<div class="reply-branch">' . $this->replyNodeHtml($node, $actions) . '</div>';
+    }
+
+    private function replyNodeHtml(array $node, ?array $actions): string
+    {
+        if (!is_array($node['object'] ?? null)) {
+            return '';
+        }
+
+        $html = $this->objectCard($node['object'], true, [
+            'children' => [],
+            'actions' => $actions,
+        ]);
+
+        foreach ((array)($node['children'] ?? []) as $child) {
+            if (is_array($child)) {
+                $html .= $this->replyNodeHtml($child, $actions);
+            }
+        }
+
+        return $html;
     }
 
     private function withMissingParents(array $objects): array
