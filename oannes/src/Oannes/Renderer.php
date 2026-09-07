@@ -1055,6 +1055,7 @@ final class Renderer
         $published = ActivityPub::published($object);
         $publishedHuman = DateFormat::human($published, (string)($this->config['timezone'] ?? 'Europe/Madrid'));
         $content = $this->contentFor($object);
+        $objectTitle = $this->objectTitleHtml($object);
         $attachments = $this->attachmentHtml($object);
         $boostedAt = is_string($object['_oannes_boosted_at'] ?? null) ? $object['_oannes_boosted_at'] : '';
         $boostedBy = is_string($object['_oannes_boosted_by'] ?? null) ? $object['_oannes_boosted_by'] : '';
@@ -1087,6 +1088,7 @@ final class Renderer
             . '<header class="object-head">' . $avatarHtml . '<div>'
             . '<p class="meta post-meta">' . $actorNameHtml . '<br/>'
             . '<span class="post-meta-line"><a href="' . Html::escape($url) . '"><time datetime="' . Html::escape($published) . '">' . Html::escape($publishedHuman) . '</time></a>' . $copyUrlHtml . $visibilityBadge . '</span></p></div></header>'
+            . $objectTitle
             . '<div class="content">' . $content . '</div>'
             . $attachments
             . $actionHtml
@@ -1937,6 +1939,20 @@ final class Renderer
         return ActivityPub::objectId($object) ?? $this->t('post.object', 'Objeto');
     }
 
+    private function objectTitleHtml(array $object): string
+    {
+        if (!in_array(ActivityPub::objectType($object), ['Article', 'Page'], true)) {
+            return '';
+        }
+
+        $name = $object['name'] ?? null;
+        if (!is_string($name) || trim($name) === '') {
+            return '';
+        }
+
+        return '<h2 class="object-title">' . Html::escape($this->plainSnippet($name)) . '</h2>';
+    }
+
     private function plainSnippet(string $html): string
     {
         $text = preg_replace('/<br\s*\/?>/i', ' ', $html) ?? $html;
@@ -1954,10 +1970,41 @@ final class Renderer
 
         $content = $object['content'] ?? '';
         if (is_string($content) && trim($content) !== '') {
+            $content = $this->withoutLeadingDuplicateTitle($object, $content);
             return Html::safeContent($this->linkUrlsInHtmlText($content));
         }
 
         return '<p class="muted">' . Html::escape($this->t('post.no_text_content', 'Sin contenido textual.')) . '</p>';
+    }
+
+    private function withoutLeadingDuplicateTitle(array $object, string $content): string
+    {
+        if (!in_array(ActivityPub::objectType($object), ['Article', 'Page'], true)) {
+            return $content;
+        }
+
+        $name = $object['name'] ?? null;
+        if (!is_string($name) || trim($name) === '') {
+            return $content;
+        }
+
+        if (preg_match('/^\s*<p\b[^>]*>(.*?)<\/p>\s*/isu', $content, $match) !== 1) {
+            return $content;
+        }
+
+        if ($this->normalizedTitleText($match[1]) !== $this->normalizedTitleText($name)) {
+            return $content;
+        }
+
+        return ltrim(substr($content, strlen($match[0])));
+    }
+
+    private function normalizedTitleText(string $html): string
+    {
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+
+        return mb_strtolower($text);
     }
 
     private function linkTextEntities(string $text): string

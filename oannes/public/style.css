@@ -521,6 +521,13 @@ h3 {
     min-width: 0;
 }
 
+.object-title {
+    margin: 0.8rem 0 0.55rem;
+    color: var(--text);
+    font-size: 1.25rem;
+    line-height: 1.22;
+}
+
 .post-avatar-link {
     display: inline-grid;
     place-items: center;
