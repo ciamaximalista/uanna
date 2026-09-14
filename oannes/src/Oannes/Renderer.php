@@ -989,6 +989,9 @@ final class Renderer
     {
         $html = '';
         $objects = $this->withMissingParents($objects);
+        if (!$child) {
+            $objects = $this->withThreadDescendants($objects);
+        }
         $tree = $this->treeFor($objects);
         $lastDay = null;
 
@@ -1005,6 +1008,35 @@ final class Renderer
         }
 
         return $html;
+    }
+
+    private function withThreadDescendants(array $objects): array
+    {
+        $objectsById = [];
+
+        foreach ($objects as $object) {
+            if (!is_array($object)) {
+                continue;
+            }
+
+            $lineage = $this->publicLineage($object);
+            $root = $lineage[0] ?? $object;
+
+            foreach ($lineage as $lineageObject) {
+                $this->addThreadObject($objectsById, $lineageObject);
+            }
+
+            $rootId = ActivityPub::objectId($root);
+            if ($rootId !== null) {
+                foreach ($this->replyDescendants($rootId) as $descendant) {
+                    $this->addThreadObject($objectsById, $descendant);
+                }
+            }
+
+            $this->addThreadObject($objectsById, $object);
+        }
+
+        return array_values($objectsById);
     }
 
     private function timelineDaySeparator(array $object, ?string &$lastDay, ?string $date = null): string
@@ -2009,7 +2041,7 @@ final class Renderer
 
     private function linkTextEntities(string $text): string
     {
-        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@.-])|(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_-]{0,63})(?![\w@.-])|https?:\/\/[^\s<>"\']+|(?<![\p{L}\p{N}_&])#([\p{L}\p{N}_][\p{L}\p{N}_-]{0,63})(?![\p{L}\p{N}_-])/u';
+        $pattern = '/(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w@-])|(?<![\w@])@([A-Za-z0-9_][A-Za-z0-9_-]{0,63})(?![\w@.-])|https?:\/\/[^\s<>"\']+|(?<![\p{L}\p{N}_&])#([\p{L}\p{N}_][\p{L}\p{N}_-]{0,63})(?![\p{L}\p{N}_-])/u';
         $html = '';
         $offset = 0;
 
@@ -2117,7 +2149,8 @@ final class Renderer
         }
 
         foreach ($this->actors->findByPreferredUsername($username, $host) ?? [] as $actor) {
-            return $this->actorUrl($actor, ActivityPub::objectId($actor) ?? '');
+            $actorId = ActivityPub::objectId($actor) ?? '';
+            return $actorId !== '' ? $this->publicUrl(['actor' => $actorId]) : $this->actorUrl($actor, '');
         }
 
         return null;

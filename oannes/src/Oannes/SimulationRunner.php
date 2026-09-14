@@ -237,6 +237,49 @@ final class SimulationRunner
         $this->check('unfollowed actor standalone post disappears from private timeline', !in_array($standaloneId, $privateIdsAfterUnfollow, true));
         $this->check('unfollowed actor reply remains in followed thread', in_array($replyId, $privateIdsAfterUnfollow, true));
 
+        $externalDiscussionRoot = [
+            'id' => 'https://third.test/notes/discussion-root-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => 'https://third.test/users/mara',
+            'published' => '2026-01-01T02:00:00Z',
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'External discussion root',
+        ];
+        $localDiscussionReply = [
+            'id' => $env['config']['base_url'] . '/u/ana/p/discussion-reply-' . $iteration,
+            'type' => 'Note',
+            'attributedTo' => $env['config']['base_url'] . '/u/ana',
+            'published' => '2026-01-01T02:05:00Z',
+            'to' => [ActivityPub::PUBLIC_AUDIENCE],
+            'content' => 'Local reply in external thread',
+            'inReplyTo' => $externalDiscussionRoot['id'],
+        ];
+        $store->writeObject($externalDiscussionRoot);
+        $store->writeObject($localDiscussionReply);
+        (new IndexBuilder($store))->rebuild();
+
+        $nestedReplyId = 'https://remote.test/notes/nested-reply-' . $iteration;
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/nested-reply-' . $iteration,
+            'type' => 'Create',
+            'actor' => $env['remote_actor'],
+            'object' => [
+                'id' => $nestedReplyId,
+                'type' => 'Note',
+                'attributedTo' => $env['remote_actor'],
+                'published' => '2026-01-01T02:10:00Z',
+                'to' => [ActivityPub::PUBLIC_AUDIENCE],
+                'content' => 'Nested reply below local reply',
+                'inReplyTo' => $localDiscussionReply['id'],
+            ],
+        ]);
+        (new InboxWorker($store, $env['queue'], $env['config']))->run();
+        $repo = new ObjectRepository($store);
+        $storedExternalDiscussionRoot = $repo->findByIdOrAlias($externalDiscussionRoot['id']);
+        $discussionHtml = (new Renderer($repo, $env['config']))->objectList([$storedExternalDiscussionRoot]);
+        $this->check('nested reply below local reply bumps external root', ($storedExternalDiscussionRoot['_oannes_thread_activity_at'] ?? null) === '2026-01-01T02:10:00Z');
+        $this->check('timeline object list includes nested reply descendants', str_contains($discussionHtml, 'Nested reply below local reply'));
+
         $booster = [
             'id' => 'https://booster.test/actor-' . $iteration,
             'type' => 'Person',

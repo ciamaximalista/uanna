@@ -342,6 +342,14 @@ final class InboxWorker
         $receivedBy[] = $localUid;
         $object['_oannes_inbox_uids'] = array_values(array_unique(array_filter($receivedBy, 'is_string')));
 
+        if (is_array($existing)) {
+            $existingThreadActivity = $existing['_oannes_thread_activity_at'] ?? null;
+            $incomingThreadActivity = $object['_oannes_thread_activity_at'] ?? null;
+            if (is_string($existingThreadActivity) && (!is_string($incomingThreadActivity) || $existingThreadActivity > $incomingThreadActivity)) {
+                $object['_oannes_thread_activity_at'] = $existingThreadActivity;
+            }
+        }
+
         $this->store->writeObject($object);
         (new IndexBuilder($this->store))->rebuild();
     }
