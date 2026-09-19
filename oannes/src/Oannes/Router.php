@@ -4095,6 +4095,14 @@ final class Router
             return false;
         }
 
+        // A non-public object (private message, followers-only) never enters a
+        // timeline unless the viewer could read it on its own page, whoever
+        // wrote it: a direct thread between a local user and a followed remote
+        // actor must stay invisible to everybody else.
+        if (!ActivityPub::isPublicObject($object) && !$this->renderer->canView($object, ['uid' => $uid])) {
+            return false;
+        }
+
         $actor = ActivityPub::attributedTo($object);
         if ($actor !== null && $this->isLocalActorId($actor)) {
             return true;

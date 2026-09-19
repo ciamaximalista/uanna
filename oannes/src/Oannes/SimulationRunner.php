@@ -778,6 +778,19 @@ final class SimulationRunner
         $this->check('private reply addresses the sender', $replyAudience === [$env['remote_actor']]);
         $this->check('private reply delivered only to the sender inbox', $inboxes === ['https://remote.test/inbox']);
 
+        // A third local user who follows both participants must not get the
+        // private thread in her timeline.
+        $store->writeJson($store->dataDir() . '/actors/local/bea.json', ['uid' => 'bea', 'name' => 'Bea']);
+        (new SocialGraph($store))->addFollowing('bea', $env['remote']);
+        (new SocialGraph($store))->addFollowing('bea', ['id' => $localActor, 'type' => 'Person', 'inbox' => $localActor . '/inbox']);
+        $replyId = ActivityPub::objectId($reply);
+        $anaIds = array_map(static fn (array $object): ?string => ActivityPub::objectId($object), $this->privateTimeline($env, 'ana', 20));
+        $beaIds = array_map(static fn (array $object): ?string => ActivityPub::objectId($object), $this->privateTimeline($env, 'bea', 20));
+        $this->check('private thread shows in participant timeline', in_array($messageId, $anaIds, true) && in_array($replyId, $anaIds, true));
+        $this->check('remote private message hidden from other local timelines', !in_array($messageId, $beaIds, true));
+        $this->check('local private reply hidden from other local timelines', !in_array($replyId, $beaIds, true));
+        $this->check('other local user cannot view private message', !$renderer->canView($stored, ['uid' => 'bea']));
+
         $threw = false;
         try {
             $service->createNote('ana', 'Nobody', ['visibility' => 'direct']);
