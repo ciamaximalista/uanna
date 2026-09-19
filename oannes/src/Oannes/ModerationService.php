@@ -108,6 +108,7 @@ final class ModerationService
         }
 
         $this->store->writeObject($object);
+        (new PrivateMessages($this->store, $this->users))->index($object);
         (new IndexBuilder($this->store))->rebuild();
 
         $case['status'] = 'approved';

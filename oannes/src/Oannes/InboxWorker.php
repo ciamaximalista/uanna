@@ -215,6 +215,7 @@ final class InboxWorker
         }
 
         $this->storeAcceptedObject($localUid, $object);
+        $this->indexPrivateMessage($object);
         $this->cacheObjectActor($object);
         $this->hydrateThreadAncestors($localUid, $object);
         $this->notifyAcceptedCreate($localUid, $activity, $object);
@@ -248,6 +249,7 @@ final class InboxWorker
         }
 
         $this->storeAcceptedObject($localUid, $object);
+        $this->indexPrivateMessage($object);
         $this->cacheObjectActor($object);
         $this->hydrateThreadAncestors($localUid, $object);
         $this->bumpLocalReplyThread($localUid, $object);
@@ -687,21 +689,34 @@ final class InboxWorker
 
     private function notifyAcceptedCreate(string $localUid, array $activity, array $object): void
     {
-        if (ActivityPub::inReplyTo($object) === null) {
-            return;
-        }
-
         $actor = ActivityPub::attributedTo($activity) ?? ActivityPub::attributedTo($object) ?? '';
         $objectId = ActivityPub::objectId($object) ?? '';
-        if ($actor === '' || $objectId === '') {
+        if ($actor === '' || $objectId === '' || $this->config === []) {
             return;
         }
 
-        if (!$this->localUserParticipatedInThread($localUid, $object)) {
+        if (ActivityPub::inReplyTo($object) !== null && $this->localUserParticipatedInThread($localUid, $object)) {
+            $this->writeNotification($localUid, 'Create', $actor, $objectId, ActivityPub::published($object));
             return;
         }
 
-        $this->writeNotification($localUid, 'Create', $actor, $objectId, ActivityPub::published($object));
+        $private = new PrivateMessages($this->store, new LocalUsers($this->store, $this->config));
+        if (!in_array($localUid, $private->localRecipients($object), true)) {
+            return;
+        }
+
+        $this->writeNotification($localUid, 'Mention', $actor, $objectId, ActivityPub::published($object), [
+            'reason' => $private->isPrivate($object) ? 'private' : 'mention',
+        ]);
+    }
+
+    private function indexPrivateMessage(array $object): void
+    {
+        if ($this->config === []) {
+            return;
+        }
+
+        (new PrivateMessages($this->store, new LocalUsers($this->store, $this->config)))->index($object);
     }
 
     private function localUserParticipatedInThread(string $localUid, array $object): bool

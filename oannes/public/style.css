@@ -1560,6 +1560,39 @@ h3 {
     border-left: 2px solid var(--border);
 }
 
+.private-actions {
+    margin: 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.4rem;
+}
+
+.private-participants {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.private-to,
+.private-name {
+    color: var(--muted);
+    font-size: 0.88rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.private-message.own > .content {
+    border-left: 3px solid var(--accent);
+    padding-left: 0.6rem;
+}
+
+.private-actions .button-link {
+    font-size: 0.85rem;
+    padding: 0.3rem 0.7rem;
+}
+
 .form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

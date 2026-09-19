@@ -19,6 +19,7 @@ use Oannes\XmlExporter;
 use Oannes\LocalUsers;
 use Oannes\ModerationService;
 use Oannes\PostService;
+use Oannes\PrivateMessages;
 use Oannes\ReadinessReport;
 use Oannes\SocialGraph;
 use Oannes\ActorRepository;
@@ -52,6 +53,7 @@ try {
         'simulate' => simulate($argv[2] ?? null),
         'readiness' => readiness($store, $config, $argv[2] ?? null),
         'backfill-boosts' => backfill_boosts($store, $config, $argv[2] ?? null),
+        'index-private' => index_private($store, $config),
         default => [
             'usage' => [
                 'php oannes/bin/oannes.php analyse-snac /path/to/snac',
@@ -73,6 +75,7 @@ try {
                 'php oannes/bin/oannes.php simulate [iterations]',
                 'php oannes/bin/oannes.php readiness [simulation-iterations]',
                 'php oannes/bin/oannes.php backfill-boosts [limit]',
+                'php oannes/bin/oannes.php index-private',
             ],
         ],
     };
@@ -140,6 +143,29 @@ function run_locked(FileStore $store, string $name, callable $callback): array
         flock($lock, LOCK_UN);
         fclose($lock);
     }
+}
+
+function index_private(FileStore $store, array $config): array
+{
+    $private = new PrivateMessages($store, new LocalUsers($store, $config));
+    $indexed = [];
+    $scanned = 0;
+
+    foreach ($store->objectFiles() as $file) {
+        $scanned++;
+
+        try {
+            $object = $store->readJson($file);
+        } catch (Throwable) {
+            continue;
+        }
+
+        foreach ($private->index($object) as $uid) {
+            $indexed[$uid] = ($indexed[$uid] ?? 0) + 1;
+        }
+    }
+
+    return ['scanned' => $scanned, 'indexed' => $indexed];
 }
 
 function backfill_boosts(FileStore $store, array $config, ?string $limitArg): array

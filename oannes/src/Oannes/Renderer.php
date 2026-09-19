@@ -7,6 +7,7 @@ final class Renderer
     private readonly LocalUsers $users;
     private readonly ActorRepository $actors;
     private readonly InteractionService $interactions;
+    private readonly SocialGraph $graph;
     private readonly I18n $i18n;
     private array $actorInfoCache = [];
     private array $canonicalIdCache = [];
@@ -18,15 +19,61 @@ final class Renderer
         $store = new FileStore($this->config['data_dir']);
         $this->users = new LocalUsers($store, $this->config);
         $this->actors = new ActorRepository($store);
+        $this->graph = new SocialGraph($store);
         $this->interactions = new InteractionService(
             $store,
             $this->users,
             new FileQueue($store),
-            new SocialGraph($store),
+            $this->graph,
             $this->actors,
             $this->config,
         );
         $this->i18n = new I18n($store, $this->config);
+    }
+
+    /**
+     * Whether the current viewer may read an object: public objects always,
+     * non-public ones only for the logged-in author, an addressed recipient,
+     * or a follower when the object is reserved to followers.
+     */
+    public function canView(array $object, ?array $actions): bool
+    {
+        if ($this->objectBlocked($object)) {
+            return false;
+        }
+
+        if (ActivityPub::isPublicObject($object)) {
+            return true;
+        }
+
+        $uid = is_array($actions) ? (string)($actions['uid'] ?? '') : '';
+        if ($uid === '') {
+            return false;
+        }
+
+        $localIds = array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid));
+        $actor = ActivityPub::attributedTo($object) ?? '';
+        if (in_array($actor, $localIds, true)) {
+            return true;
+        }
+
+        $audience = ActivityPub::audience($object);
+        if (array_intersect($localIds, $audience) !== []) {
+            return true;
+        }
+
+        $receivedBy = $object['_oannes_inbox_uids'] ?? [];
+        if (is_array($receivedBy) && in_array($uid, $receivedBy, true)) {
+            return true;
+        }
+
+        foreach ($audience as $target) {
+            if ($actor !== '' && str_ends_with($target, '/followers')) {
+                return $this->localUidForActorId($actor) !== null || $this->graph->isFollowing($uid, $actor);
+            }
+        }
+
+        return false;
     }
 
     public function t(string $key, string $fallback = '', array $params = []): string
@@ -869,7 +916,7 @@ final class Renderer
                 continue;
             }
 
-            $tree = $this->treeFor($this->profileThreadObjects($object));
+            $tree = $this->treeFor($this->profileThreadObjects($object, $actions));
 
             foreach ($tree as $node) {
                 if (!is_array($node['object'] ?? null)) {
@@ -912,10 +959,10 @@ final class Renderer
             . '</div>';
     }
 
-    private function profileThreadObjects(array $object): array
+    private function profileThreadObjects(array $object, ?array $actions = null): array
     {
         $objectsById = [];
-        $lineage = $this->publicLineage($object);
+        $lineage = $this->publicLineage($object, $actions);
         $root = $lineage[0] ?? $object;
 
         foreach ($lineage as $lineageObject) {
@@ -924,7 +971,7 @@ final class Renderer
 
         $rootId = ActivityPub::objectId($root);
         if ($rootId !== null) {
-            foreach ($this->replyDescendants($rootId) as $descendant) {
+            foreach ($this->replyDescendants($rootId, 0, $actions) as $descendant) {
                 $this->addThreadObject($objectsById, $descendant);
             }
         }
@@ -934,7 +981,7 @@ final class Renderer
         return array_values($objectsById);
     }
 
-    private function publicLineage(array $object): array
+    private function publicLineage(array $object, ?array $actions = null): array
     {
         $lineage = [$object];
         $seen = [];
@@ -948,7 +995,7 @@ final class Renderer
 
             $seen[$parent] = true;
             $parentObject = $this->repo->findByIdOrAlias($parent);
-            if ($parentObject === null || !ActivityPub::isPublicObject($parentObject) || $this->objectBlocked($parentObject)) {
+            if ($parentObject === null || !$this->canView($parentObject, $actions)) {
                 break;
             }
 
@@ -971,14 +1018,14 @@ final class Renderer
     {
         $object = $this->repo->findByIdOrAlias($id);
 
-        if ($object === null || !ActivityPub::isPublicObject($object) || $this->objectBlocked($object)) {
+        if ($object === null || !$this->canView($object, $actions)) {
             http_response_code(404);
             return $this->page($this->t('page.not_found', 'No encontrado'), '<h1>' . Html::escape($this->t('page.not_found', 'No encontrado')) . '</h1>');
         }
 
         $title = $this->titleFor($object);
         $body = $this->objectCard($object, false, [
-            'children' => $this->replyTree(ActivityPub::objectId($object) ?? $id),
+            'children' => $this->replyTree(ActivityPub::objectId($object) ?? $id, $actions),
             'actions' => $actions,
         ]);
 
@@ -990,7 +1037,7 @@ final class Renderer
         $html = '';
         $objects = $this->withMissingParents($objects);
         if (!$child) {
-            $objects = $this->withThreadDescendants($objects);
+            $objects = $this->withThreadDescendants($objects, $options['actions'] ?? null);
         }
         $tree = $this->treeFor($objects);
         $lastDay = null;
@@ -1010,7 +1057,7 @@ final class Renderer
         return $html;
     }
 
-    private function withThreadDescendants(array $objects): array
+    private function withThreadDescendants(array $objects, ?array $actions = null): array
     {
         $objectsById = [];
 
@@ -1019,7 +1066,7 @@ final class Renderer
                 continue;
             }
 
-            $lineage = $this->publicLineage($object);
+            $lineage = $this->publicLineage($object, $actions);
             $root = $lineage[0] ?? $object;
 
             foreach ($lineage as $lineageObject) {
@@ -1028,7 +1075,7 @@ final class Renderer
 
             $rootId = ActivityPub::objectId($root);
             if ($rootId !== null) {
-                foreach ($this->replyDescendants($rootId) as $descendant) {
+                foreach ($this->replyDescendants($rootId, 0, $actions) as $descendant) {
                     $this->addThreadObject($objectsById, $descendant);
                 }
             }
@@ -1109,7 +1156,7 @@ final class Renderer
         $actorNameHtml = '<a class="post-author-link" href="' . $actorInternalUrl . '"><strong>' . Html::escape($actorInfo['label']) . '</strong></a>';
         $childrenHtml = $this->childrenHtml($children, $actions);
         $ownActions = $this->ownPostActions($object, $actions);
-        $actionHtml = $this->actionBar($id, $interactionActors, $actions, $ownActions);
+        $actionHtml = $this->actionBar($object, $interactionActors, $actions, $ownActions);
         $visibilityBadge = $this->visibilityBadge($object);
         $copyUrlHtml = $url !== '' ? $this->copyPostUrlButton($url) : '';
 
@@ -1289,18 +1336,16 @@ final class Renderer
 
     private function visibilityBadge(array $object): string
     {
-        $audience = ActivityPub::audience($object);
+        $visibility = $this->objectVisibility($object);
 
-        if (in_array(ActivityPub::PUBLIC_AUDIENCE, $audience, true)) {
+        if ($visibility === 'public') {
             return '';
         }
 
-        foreach ($audience as $target) {
-            if (is_string($target) && str_ends_with($target, '/followers')) {
-                return '<span class="visibility-badge followers" title="' . Html::escape($this->t('visibility.followers_reserved', 'Reservado a seguidores')) . '">'
-                    . Html::escape($this->t('visibility.followers_reserved', 'Reservado a seguidores'))
-                    . '</span>';
-            }
+        if ($visibility === 'followers') {
+            return '<span class="visibility-badge followers" title="' . Html::escape($this->t('visibility.followers_reserved', 'Reservado a seguidores')) . '">'
+                . Html::escape($this->t('visibility.followers_reserved', 'Reservado a seguidores'))
+                . '</span>';
         }
 
         return '<span class="visibility-badge private" title="' . Html::escape($this->t('visibility.private', 'Privado')) . '">'
@@ -1308,8 +1353,9 @@ final class Renderer
             . '</span>';
     }
 
-    private function actionBar(string $id, array $interactionActors, ?array $actions, string $ownActions = ''): string
+    private function actionBar(array $object, array $interactionActors, ?array $actions, string $ownActions = ''): string
     {
+        $id = ActivityPub::objectId($object) ?? '';
         $stats = $this->interactionAvatars($this->t('stats.favorites', 'Favoritos'), $interactionActors['likes'] ?? [])
             . $this->interactionAvatars($this->t('stats.boosts', 'Impulsos'), $interactionActors['boosts'] ?? []);
 
@@ -1324,7 +1370,10 @@ final class Renderer
         $boosted = $uid !== '' && $this->interactions->hasLocalReactionForCanonicalId($uid, $id, 'Announce');
         $likeLabel = $liked ? $this->t('actions.unfavorite', 'Quitar fav') : $this->t('actions.favorite', 'Favoritear');
         $boostLabel = $boosted ? $this->t('actions.unboost', 'Quitar impulso') : $this->t('actions.boost', 'Impulsar');
-        $replyModal = $this->replyModal($id, $csrf);
+        $boostButton = ActivityPub::isPublicObject($object) || $boosted
+            ? '<button type="submit" name="type" value="Announce">' . $boostLabel . '</button>'
+            : '';
+        $replyModal = $this->replyModal($object, $csrf);
         $returnTo = Html::escape($this->currentPageWithAnchor($this->postAnchor($id)));
 
         return '<footer class="post-actions">'
@@ -1333,7 +1382,7 @@ final class Renderer
             . '<input type="hidden" name="id" value="' . $encodedId . '"/>'
             . '<input type="hidden" name="return_to" value="' . $returnTo . '"/>'
             . '<button type="submit" name="type" value="Like">' . $likeLabel . '</button>'
-            . '<button type="submit" name="type" value="Announce">' . $boostLabel . '</button>'
+            . $boostButton
             . '</form>'
             . '<a class="button-link reply-link" href="#reply-' . Html::escape(substr(Id::digest($id), 0, 12)) . '">' . Html::escape($this->t('actions.reply', 'Responder')) . '</a>'
             . $ownActions
@@ -1342,8 +1391,9 @@ final class Renderer
             . '</footer>';
     }
 
-    private function replyModal(string $id, string $csrf): string
+    private function replyModal(array $object, string $csrf): string
     {
+        $id = ActivityPub::objectId($object) ?? '';
         $suffix = Html::escape(substr(Id::digest($id), 0, 12));
         $encodedId = Html::escape($id);
 
@@ -1355,13 +1405,57 @@ final class Renderer
             . '<input type="hidden" name="csrf" value="' . $csrf . '"/>'
             . '<input type="hidden" name="inReplyTo" value="' . $encodedId . '"/>'
             . '<label>' . Html::escape($this->t('field.text', 'Texto')) . ' <textarea name="content" rows="7" required></textarea></label>'
-            . '<label>' . Html::escape($this->t('field.visibility', 'Visibilidad')) . ' <select name="visibility"><option value="public">' . Html::escape($this->t('visibility.public', 'Pública')) . '</option><option value="followers">' . Html::escape($this->t('visibility.followers_only', 'Sólo para seguidores')) . '</option></select></label>'
+            . '<label>' . Html::escape($this->t('field.visibility', 'Visibilidad')) . ' ' . $this->replyVisibilitySelect($object) . '</label>'
             . $this->postImageInputs()
             . '<label>' . Html::escape($this->t('field.alt_texts', 'Textos alt, uno por línea')) . ' <textarea name="image_alt" rows="4"></textarea></label>'
             . '<div class="modal-actions"><button type="submit">' . Html::escape($this->t('actions.send', 'Enviar')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.cancel', 'Cancelar')) . '</a></div>'
             . '</form>'
             . '</article>'
             . '</section>';
+    }
+
+    /**
+     * A reply never widens the audience of its parent: a private message only
+     * gets private replies, a followers-only post defaults to followers.
+     */
+    private function replyVisibilitySelect(array $parent): string
+    {
+        $labels = [
+            'public' => $this->t('visibility.public', 'Pública'),
+            'followers' => $this->t('visibility.followers_only', 'Sólo para seguidores'),
+            'direct' => $this->t('visibility.direct', 'Privada, sólo a quien participa'),
+        ];
+
+        $parentVisibility = $this->objectVisibility($parent);
+        $choices = match ($parentVisibility) {
+            'direct' => ['direct'],
+            'followers' => ['followers', 'direct'],
+            default => ['public', 'followers', 'direct'],
+        };
+
+        $html = '<select name="visibility">';
+        foreach ($choices as $value) {
+            $html .= '<option value="' . $value . '"' . ($value === $parentVisibility ? ' selected' : '') . '>' . Html::escape($labels[$value]) . '</option>';
+        }
+
+        return $html . '</select>';
+    }
+
+    private function objectVisibility(array $object): string
+    {
+        $audience = ActivityPub::audience($object);
+
+        if (in_array(ActivityPub::PUBLIC_AUDIENCE, $audience, true)) {
+            return 'public';
+        }
+
+        foreach ($audience as $target) {
+            if (is_string($target) && str_ends_with($target, '/followers')) {
+                return 'followers';
+            }
+        }
+
+        return 'direct';
     }
 
     private function postAnchor(string $id): string
@@ -1652,15 +1746,15 @@ final class Renderer
         return $this->canonicalIdCache[$id] = $canonical;
     }
 
-    private function replyTree(string $id): array
+    private function replyTree(string $id, ?array $actions = null): array
     {
-        $children = $this->replyDescendants($id);
+        $children = $this->replyDescendants($id, 0, $actions);
         $tree = $this->treeFor($children);
         $this->sortRootReplyNodesChronologically($tree);
         return $tree;
     }
 
-    private function replyDescendants(string $id, int $depth = 0): array
+    private function replyDescendants(string $id, int $depth = 0, ?array $actions = null): array
     {
         if ($depth >= 8) {
             return [];
@@ -1669,7 +1763,7 @@ final class Renderer
         $all = [];
 
         foreach ($this->repo->childrenOf($id) as $child) {
-            if (!ActivityPub::isPublicObject($child) || $this->objectBlocked($child)) {
+            if (!$this->canView($child, $actions)) {
                 continue;
             }
 
@@ -1677,7 +1771,7 @@ final class Renderer
             $childId = ActivityPub::objectId($child);
 
             if ($childId !== null) {
-                $all = array_merge($all, $this->replyDescendants($childId, $depth + 1));
+                $all = array_merge($all, $this->replyDescendants($childId, $depth + 1, $actions));
             }
         }
 

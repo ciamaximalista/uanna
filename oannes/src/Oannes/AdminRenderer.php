@@ -697,6 +697,15 @@ final class AdminRenderer
             return '<p class="meta">' . $this->actorLink($actor) . ' ' . Html::escape($this->t('notification.replied_in', 'respondió en')) . ' <a href="' . Html::escape($objid) . '">' . Html::escape($objid) . '</a></p>';
         }
 
+        if ($type === 'Mention' && $actor !== '' && $objid !== '') {
+            $internalUrl = '?id=' . rawurlencode($objid);
+            $verb = $reason === 'private'
+                ? $this->t('notification.sent_private', 'te envió un mensaje privado')
+                : $this->t('notification.mentioned_in', 'te mencionó en');
+
+            return '<p class="meta">' . $this->actorLink($actor) . ' ' . Html::escape($verb) . ' <a href="' . Html::escape($internalUrl) . '">' . Html::escape($objid) . '</a></p>';
+        }
+
         if ($type === 'Webmention' && $actor !== '') {
             return '<p class="meta"><a href="' . Html::escape($actor) . '">' . Html::escape($actor) . '</a></p>';
         }
@@ -850,7 +859,7 @@ final class AdminRenderer
         $html .= '<div class="private-list">';
 
         foreach ($this->privateMessageTree($messages) as $node) {
-            $html .= '<article class="private-dialog">' . $this->privateMessageNode($node) . '</article>';
+            $html .= '<article class="private-dialog">' . $this->privateMessageNode($node, $csrf) . '</article>';
         }
 
         return $html . '</div>';
@@ -896,39 +905,83 @@ final class AdminRenderer
         return $roots;
     }
 
-    private function privateMessageNode(array $node): string
+    private function privateMessageNode(array $node, string $csrf): string
     {
         $message = is_array($node['message'] ?? null) ? $node['message'] : [];
+        $own = (bool)($message['own'] ?? false);
         $actor = (string)($message['actor'] ?? '');
-        $info = $actor !== '' ? $this->renderer->actorInfo($actor) : [
-            'label' => $this->t('private.unknown_sender', 'Remitente desconocido'),
-            'url' => '#',
-            'avatar' => '',
-            'initial' => '?',
-        ];
+        $recipients = array_values(array_filter(is_array($message['recipients'] ?? null) ? $message['recipients'] : [], 'is_string'));
         $published = (string)($message['published'] ?? '');
+        $id = (string)($message['id'] ?? '');
+        $suffix = $id !== '' ? substr(Id::digest($id), 0, 12) : '';
+        $replyUrl = $id !== '' ? '?id=' . rawurlencode($id) . '#reply-' . $suffix : '';
         $children = is_array($node['children'] ?? null) ? $node['children'] : [];
         $childrenHtml = '';
-        $avatar = (string)($info['avatar'] ?? '');
-        $initial = (string)($info['initial'] ?? '?');
-        $avatarHtml = $avatar !== ''
-            ? '<img class="private-avatar" src="' . Html::escape($avatar) . '" alt=""/>'
-            : '<span class="private-avatar avatar-fallback">' . Html::escape($initial) . '</span>';
 
         foreach ($children as $child) {
             if (is_array($child)) {
-                $childrenHtml .= $this->privateMessageNode($child);
+                $childrenHtml .= $this->privateMessageNode($child, $csrf);
             }
         }
 
-        return '<article class="private-message">'
+        // Sent messages show who they went to; received ones show the sender.
+        $participantsHtml = $own
+            ? '<span class="private-to">' . Html::escape($this->t('private.to', 'Para')) . '</span>' . $this->privateAvatars($recipients)
+            : $this->privateAvatars($actor !== '' ? [$actor] : []);
+
+        $actionsHtml = '';
+        if ($replyUrl !== '') {
+            $actionsHtml .= '<a class="button-link secondary" href="' . Html::escape($replyUrl) . '">' . Html::escape($this->t('actions.reply', 'Responder')) . '</a>';
+        }
+        if ($own && $id !== '') {
+            $actionsHtml .= '<a class="button-link secondary danger-link" href="#delete-private-' . Html::escape($suffix) . '">' . Html::escape($this->t('actions.delete', 'Borrar')) . '</a>';
+        }
+
+        $deleteModal = $own && $id !== ''
+            ? '<section id="delete-private-' . Html::escape($suffix) . '" class="modal-overlay" aria-label="' . Html::escape($this->t('post.delete', 'Borrar publicación')) . '">'
+                . '<a class="modal-backdrop" href="#" aria-label="' . Html::escape($this->t('actions.no', 'No')) . '"></a>'
+                . '<article class="compose-modal"><header><h2>' . Html::escape($this->t('actions.delete', 'Borrar')) . '</h2><a class="modal-close" href="#" aria-label="' . Html::escape($this->t('actions.no', 'No')) . '">×</a></header>'
+                . '<p>' . Html::escape($this->t('post.delete_confirm', '¿Seguro que quieres borrar esta publicación?')) . '</p>'
+                . '<form method="post" action="?route=admin/post-delete">'
+                . '<input type="hidden" name="csrf" value="' . Html::escape($csrf) . '"/>'
+                . '<input type="hidden" name="id" value="' . Html::escape($id) . '"/>'
+                . '<input type="hidden" name="return_to" value="?route=admin&amp;section=private"/>'
+                . '<div class="modal-actions"><button type="submit" class="danger">' . Html::escape($this->t('actions.yes', 'Sí')) . '</button><a class="button-link secondary" href="#">' . Html::escape($this->t('actions.no', 'No')) . '</a></div>'
+                . '</form></article></section>'
+            : '';
+
+        return '<article class="private-message' . ($own ? ' own' : '') . '">'
             . '<header class="private-message-head">'
             . '<time datetime="' . Html::escape($published) . '">' . Html::escape(DateFormat::human($published)) . '</time>'
-            . '<a class="private-sender" href="' . Html::escape((string)$info['url']) . '" title="' . Html::escape((string)$info['label']) . '" aria-label="' . Html::escape((string)$info['label']) . '">' . $avatarHtml . '</a>'
+            . '<span class="private-participants">' . $participantsHtml . '</span>'
             . '</header>'
             . '<div class="content">' . Html::safeContent((string)($message['content'] ?? '')) . '</div>'
+            . ($actionsHtml !== '' ? '<p class="private-actions">' . $actionsHtml . '</p>' : '')
+            . $deleteModal
             . ($childrenHtml !== '' ? '<div class="private-replies">' . $childrenHtml . '</div>' : '')
             . '</article>';
+    }
+
+    private function privateAvatars(array $actorIds): string
+    {
+        if ($actorIds === []) {
+            $label = $this->t('private.unknown_sender', 'Remitente desconocido');
+            return '<span class="private-sender" title="' . Html::escape($label) . '"><span class="private-avatar avatar-fallback">?</span></span>';
+        }
+
+        $html = '';
+        foreach ($actorIds as $actorId) {
+            $info = $this->renderer->actorInfo($actorId);
+            $label = (string)($info['label'] ?? $actorId);
+            $avatar = (string)($info['avatar'] ?? '');
+            $avatarHtml = $avatar !== ''
+                ? '<img class="private-avatar" src="' . Html::escape($avatar) . '" alt=""/>'
+                : '<span class="private-avatar avatar-fallback">' . Html::escape((string)($info['initial'] ?? '?')) . '</span>';
+            $html .= '<a class="private-sender" href="' . Html::escape((string)($info['url'] ?? $actorId)) . '" title="' . Html::escape($label) . '" aria-label="' . Html::escape($label) . '">' . $avatarHtml . '</a>'
+                . '<span class="private-name">' . Html::escape($label) . '</span>';
+        }
+
+        return $html;
     }
 
     private function followReviews(array $pendingFollows, string $csrf): string

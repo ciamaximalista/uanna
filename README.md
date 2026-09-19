@@ -230,6 +230,7 @@ php oannes/bin/oannes.php queue-list
 php oannes/bin/oannes.php auth-audit
 php oannes/bin/oannes.php readiness 20
 php oannes/bin/oannes.php backfill-boosts 50
+php oannes/bin/oannes.php index-private
 ```
 
 ## User Export and Import

@@ -17,6 +17,7 @@ final class SimulationRunner
             $this->scenarioFollowReject($i);
             $this->scenarioCreateModeration($i);
             $this->scenarioNotifiedReplyAppearsAndBumpsLocalThread($i);
+            $this->scenarioRemotePrivateMessage($i);
             $this->scenarioInteractionAccept($i);
             $this->scenarioRemoteBoostFromFollowed($i);
             $this->scenarioReplyMentionAnnounce($i);
@@ -723,6 +724,67 @@ final class SimulationRunner
         } catch (\Throwable $e) {
             $this->check('cross attribution rejected', $e->getMessage() === 'Create actor does not match object attribution');
         }
+    }
+
+    private function scenarioRemotePrivateMessage(int $iteration): void
+    {
+        $env = $this->environment('private-message-' . $iteration);
+        $store = $env['store'];
+        $config = $env['config'];
+        $localActor = $config['base_url'] . '/u/ana';
+        (new SocialGraph($store))->addFollowing('ana', $env['remote']);
+
+        $messageId = 'https://remote.test/notes/private-' . $iteration;
+        $this->receive($env, [
+            'id' => 'https://remote.test/a/private-' . $iteration,
+            'type' => 'Create',
+            'actor' => $env['remote_actor'],
+            'to' => [$localActor],
+            'object' => [
+                'id' => $messageId,
+                'type' => 'Note',
+                'attributedTo' => $env['remote_actor'],
+                'published' => '2026-01-01T00:00:00Z',
+                'to' => [$localActor],
+                'cc' => [],
+                'content' => 'Private hello',
+                'tag' => [['type' => 'Mention', 'href' => $localActor, 'name' => '@ana@example.test']],
+            ],
+        ]);
+        (new InboxWorker($store, $env['queue'], $config))->run();
+
+        $repo = new ObjectRepository($store);
+        $stored = $repo->findByIdOrAlias($messageId);
+        $renderer = new Renderer($repo, $config);
+        $notification = $store->dataDir() . '/users/ana/notify/' . Id::digest('Mention:' . $env['remote_actor'] . ':' . $messageId) . '.json';
+
+        $this->check('private message stored', is_array($stored));
+        $this->check('private message indexed for recipient', is_file($store->dataDir() . '/users/ana/private/' . md5($messageId) . '.json'));
+        $this->check('private message notifies recipient', is_file($notification) && (($store->readJson($notification)['reason'] ?? null) === 'private'));
+        $this->check('recipient can view private message', is_array($stored) && $renderer->canView($stored, ['uid' => 'ana']));
+        $this->check('anonymous cannot view private message', is_array($stored) && !$renderer->canView($stored, null));
+        $this->check('private message is not public json', is_array($stored) && !ActivityPub::isPublicObject($stored));
+
+        $service = new PostService($store, new LocalUsers($store, $config), $env['queue'], new SocialGraph($store), $config);
+        $reply = $service->createNote('ana', 'Private answer ' . $iteration, [
+            'visibility' => 'direct',
+            'inReplyTo' => $messageId,
+        ]);
+        $replyAudience = ActivityPub::audience($reply);
+        $inboxes = array_map(static fn (array $job): string => (string)($job['payload']['inbox'] ?? ''), $this->deliverJobs($env['queue']));
+
+        $this->check('private reply is not public', !ActivityPub::isPublicObject($reply));
+        $this->check('private reply is not for followers', !in_array($localActor . '/followers', $replyAudience, true));
+        $this->check('private reply addresses the sender', $replyAudience === [$env['remote_actor']]);
+        $this->check('private reply delivered only to the sender inbox', $inboxes === ['https://remote.test/inbox']);
+
+        $threw = false;
+        try {
+            $service->createNote('ana', 'Nobody', ['visibility' => 'direct']);
+        } catch (\InvalidArgumentException) {
+            $threw = true;
+        }
+        $this->check('direct note without recipient is rejected', $threw);
     }
 
     private function scenarioInteractionAccept(int $iteration): void

@@ -1643,6 +1643,7 @@ final class Router
 
         $csrf = $_POST['csrf'] ?? null;
         $id = $_POST['id'] ?? null;
+        $returnTo = $_POST['return_to'] ?? null;
 
         if (!$auth->checkCsrf(is_string($csrf) ? $csrf : null) || !is_string($id)) {
             echo $this->adminDashboard($uid, $auth, null, 'Solicitud no válida.');
@@ -1673,7 +1674,7 @@ final class Router
             return;
         }
 
-        header('Location: /');
+        header('Location: ' . (is_string($returnTo) && $returnTo !== '' ? $this->safeReturnLocation($returnTo) : '/'));
     }
 
     private function adminProfile(string $method): void
@@ -4220,14 +4221,23 @@ final class Router
                 }
             }
 
+            if ($type === 'Mention') {
+                $object = $objid !== '' ? $this->repo->findByIdOrAlias($objid) : null;
+                if ($object === null) {
+                    continue;
+                }
+            }
+
             $items[] = [
                 'type' => $type,
                 'label' => match ($type) {
-                    'Like' => 'Favorito',
-                    'Announce' => 'Impulso',
-                    'Follow' => 'Nuevo seguidor',
-                    'Create' => 'Respuesta',
-                    'Mention' => 'Mención',
+                    'Like' => $this->renderer->t('notification.favorite', 'Favorito'),
+                    'Announce' => $this->renderer->t('notification.boost', 'Impulso'),
+                    'Follow' => $this->renderer->t('notification.new_follower', 'Nuevo seguidor'),
+                    'Create' => $this->renderer->t('notification.reply', 'Respuesta'),
+                    'Mention' => $reason === 'private'
+                        ? $this->renderer->t('notification.private_message', 'Mensaje privado')
+                        : $this->renderer->t('notification.mention', 'Mención'),
                     'Webmention' => 'Webmention',
                     default => $type,
                 },
@@ -4383,14 +4393,14 @@ final class Router
                 continue;
             }
 
-            $message = $this->privateMessageFromObject($object);
+            $message = $this->privateMessageFromObject($object, false);
             if ($message !== null) {
                 $messages[$message['id'] !== '' ? $message['id'] : 'received:' . $hash] = $message;
             }
         }
 
         foreach ($this->sentPrivateMessages($uid, $limit * 3) as $object) {
-            $message = $this->privateMessageFromObject($object);
+            $message = $this->privateMessageFromObject($object, true);
             if ($message !== null) {
                 $messages[$message['id'] !== '' ? $message['id'] : 'sent:' . count($messages)] = $message;
             }
@@ -4658,7 +4668,7 @@ final class Router
         return true;
     }
 
-    private function privateMessageFromObject(array $object): ?array
+    private function privateMessageFromObject(array $object, bool $own): ?array
     {
         $content = is_string($object['content'] ?? null) ? $object['content'] : '';
         $id = ActivityPub::objectId($object) ?? '';
@@ -4667,9 +4677,16 @@ final class Router
             return null;
         }
 
+        $recipients = array_values(array_filter(
+            $this->audienceValues($object),
+            static fn (string $target): bool => $target !== ActivityPub::PUBLIC_AUDIENCE && !str_ends_with($target, '/followers')
+        ));
+
         return [
             'id' => $id,
             'actor' => ActivityPub::attributedTo($object) ?? '',
+            'recipients' => $recipients,
+            'own' => $own,
             'inReplyTo' => ActivityPub::inReplyTo($object) ?? '',
             'published' => ActivityPub::published($object),
             'content' => $content,

@@ -43,11 +43,22 @@ final class PostService
         $to = [];
         $cc = [];
 
-        if ($visibility === 'public') {
+        if ($visibility === 'direct') {
+            $directRecipients = is_string($directTo) && $directTo !== '' ? [$directTo] : [];
+            if (is_string($inReplyTo) && $inReplyTo !== '') {
+                $directRecipients = array_merge($directRecipients, $this->directReplyRecipients($uid, $inReplyTo));
+            }
+
+            $directRecipients = array_values(array_unique($directRecipients));
+            if ($directRecipients === []) {
+                throw new \InvalidArgumentException('Un mensaje privado necesita destinatario.');
+            }
+
+            $directTo = $directRecipients[0];
+            $to = $directRecipients;
+        } elseif ($visibility === 'public') {
             $to[] = 'https://www.w3.org/ns/activitystreams#Public';
             $cc[] = $followers;
-        } elseif ($visibility === 'direct' && is_string($directTo) && $directTo !== '') {
-            $to[] = $directTo;
         } else {
             $to[] = $followers;
         }
@@ -108,7 +119,7 @@ final class PostService
 
         $this->store->writeObject($note);
         if ($visibility === 'direct') {
-            $this->indexLocalPrivateRecipients($note);
+            (new PrivateMessages($this->store, $this->users))->index($note);
         }
         (new IndexBuilder($this->store))->rebuild();
 
@@ -216,6 +227,7 @@ final class PostService
 
         $this->enqueueAudience($uid, $note, $delete);
         $this->store->deleteObject($id);
+        (new PrivateMessages($this->store, $this->users))->remove($note);
         (new IndexBuilder($this->store))->rebuild();
     }
 
@@ -555,37 +567,34 @@ final class PostService
         return [$inbox];
     }
 
-    private function indexLocalPrivateRecipients(array $note): void
+    /**
+     * Recipients of a private reply: the parent's author plus whoever the
+     * parent was addressed to, minus followers collections and ourselves.
+     */
+    private function directReplyRecipients(string $uid, string $inReplyTo): array
     {
-        $id = ActivityPub::objectId($note);
-        if ($id === null) {
-            return;
+        $parent = (new ObjectRepository($this->store))->findByIdOrAlias($inReplyTo);
+        if ($parent === null) {
+            return [];
         }
 
-        $hash = md5($id);
+        $own = array_merge([$this->users->actorId($uid), $this->users->webUrl($uid)], $this->users->legacyActorIds($uid));
+        $candidates = ActivityPub::audience($parent);
+        $author = ActivityPub::attributedTo($parent);
+        if ($author !== null) {
+            array_unshift($candidates, $author);
+        }
 
-        foreach (ActivityPub::audience($note) as $actorId) {
-            $localUid = $this->localUidForActor($actorId);
-            if ($localUid === null) {
+        $recipients = [];
+        foreach ($candidates as $actorId) {
+            if ($actorId === ActivityPub::PUBLIC_AUDIENCE || str_ends_with($actorId, '/followers') || in_array($actorId, $own, true)) {
                 continue;
             }
 
-            $privateDir = $this->store->dataDir() . '/users/' . rawurlencode($localUid) . '/private';
-            $this->store->writeJson($privateDir . '/' . $hash . '.json', $note);
-            $this->appendPrivateIndex($this->store->dataDir() . '/users/' . rawurlencode($localUid) . '/private.idx', $hash);
-        }
-    }
-
-    private function appendPrivateIndex(string $path, string $hash): void
-    {
-        $lines = is_file($path) ? (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) : [];
-        $lines = array_values(array_unique(array_filter(array_map('trim', $lines), static fn (string $line): bool => $line !== '')));
-
-        if (!in_array($hash, $lines, true)) {
-            array_unshift($lines, $hash);
+            $recipients[] = $actorId;
         }
 
-        $this->store->writeText($path, implode("\n", $lines) . "\n");
+        return array_values(array_unique($recipients));
     }
 
     private function localUidForActor(string $actorId): ?string

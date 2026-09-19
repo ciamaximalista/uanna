@@ -59,11 +59,11 @@ Campos:
 - `content`: texto obligatorio.
 - `visibility`: `public`, `followers` o `direct`. Por defecto: `public`.
 - `inReplyTo`: ID/URL del objeto al que responde, opcional.
-- `to`: actor destinatario, obligatorio para `direct`.
+- `to`: actor destinatario, obligatorio para `direct` salvo que haya `inReplyTo`; en ese caso el privado va a quien escribió el mensaje original y a sus demás destinatarios.
 
 ### `POST /api/reply`
 
-Crea una respuesta. Requiere `content` e `inReplyTo`.
+Crea una respuesta. Requiere `content` e `inReplyTo`. Acepta `visibility` (`public`, `followers` o `direct`); con `direct` la respuesta se envía sólo a quien participa en el mensaje original.
 
 ```sh
 curl -u usuario:contrasena \
