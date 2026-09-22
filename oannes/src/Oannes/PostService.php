@@ -211,22 +211,29 @@ final class PostService
             throw new \RuntimeException('No puedes borrar esa publicación.');
         }
 
+        $noteId = ActivityPub::objectId($note) ?? $id;
         $delete = [
             '@context' => 'https://www.w3.org/ns/activitystreams',
-            'id' => $id . '#delete-' . gmdate('YmdHis'),
+            'id' => $noteId . '#delete',
             'type' => 'Delete',
             'actor' => $actorId,
             'published' => gmdate('c'),
             'to' => is_array($note['to'] ?? null) ? $note['to'] : [],
             'cc' => is_array($note['cc'] ?? null) ? $note['cc'] : [],
             'object' => [
-                'id' => $id,
+                'id' => $noteId,
                 'type' => 'Tombstone',
             ],
         ];
 
+        // A Create/Update still waiting for retry would recreate the note on
+        // the remote side after the Delete; drop them before queueing it.
+        $this->queue->cancelDeliveriesForObject($noteId);
+        if ($id !== $noteId) {
+            $this->queue->cancelDeliveriesForObject($id);
+        }
         $this->enqueueAudience($uid, $note, $delete);
-        $this->store->deleteObject($id);
+        $this->store->deleteObject($noteId);
         (new PrivateMessages($this->store, $this->users))->remove($note);
         (new IndexBuilder($this->store))->rebuild();
     }

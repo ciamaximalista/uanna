@@ -129,6 +129,42 @@ final class FileQueue
         $this->store->writeJson($this->path('dead', $id), $job);
     }
 
+    /**
+     * Drops pending deliveries of Create/Update activities whose object has
+     * been deleted locally, so a retry cannot resurrect it remotely after the
+     * Delete has gone out. Returns the number of jobs removed.
+     */
+    public function cancelDeliveriesForObject(string $objectId): int
+    {
+        $cancelled = 0;
+
+        foreach ($this->list('pending', 100000) as $job) {
+            if (self::deliversObject($job, $objectId)) {
+                $this->remove('pending', (string)$job['id']);
+                $cancelled++;
+            }
+        }
+
+        return $cancelled;
+    }
+
+    private static function deliversObject(array $job, string $objectId): bool
+    {
+        if (($job['type'] ?? null) !== 'deliver') {
+            return false;
+        }
+
+        $activity = $job['payload']['activity'] ?? null;
+        if (!is_array($activity) || !in_array($activity['type'] ?? null, ['Create', 'Update'], true)) {
+            return false;
+        }
+
+        $object = $activity['object'] ?? null;
+        $id = is_array($object) ? ($object['id'] ?? null) : $object;
+
+        return is_string($id) && $id === $objectId;
+    }
+
     public function complete(array $job): void
     {
         $id = (string)$job['id'];

@@ -22,6 +22,7 @@ final class DeliveryWorker
             'failed' => 0,
             'dead' => 0,
             'skipped' => 0,
+            'cancelled' => 0,
             'dry_run' => $dryRun,
             'delivery_enabled' => (bool)($this->config['delivery_enabled'] ?? false),
         ];
@@ -42,6 +43,19 @@ final class DeliveryWorker
             }
 
             $handled++;
+
+            // The object was deleted locally while this job waited (e.g. a
+            // timed-out Create being retried): sending it now would undo the
+            // Delete on the remote side.
+            if ($this->deliversDeletedLocalObject($claimed)) {
+                if (!$dryRun) {
+                    $claimed['cancelled'] = 'object deleted locally';
+                    $this->queue->complete($claimed);
+                }
+                $stats['cancelled']++;
+                continue;
+            }
+
             try {
                 $result = $this->deliver($claimed, $dryRun);
 
@@ -243,6 +257,27 @@ final class DeliveryWorker
         }
 
         return (int)$match[1];
+    }
+
+    private function deliversDeletedLocalObject(array $job): bool
+    {
+        $activity = $job['payload']['activity'] ?? null;
+        if (!is_array($activity) || !in_array($activity['type'] ?? null, ['Create', 'Update'], true)) {
+            return false;
+        }
+
+        $object = $activity['object'] ?? null;
+        if (!is_array($object) || ($object['type'] ?? null) !== 'Note') {
+            return false;
+        }
+
+        $id = $object['id'] ?? null;
+        $base = rtrim((string)$this->config['base_url'], '/') . '/';
+        if (!is_string($id) || !str_starts_with($id, $base)) {
+            return false;
+        }
+
+        return !is_file(Id::objectPath($this->store->dataDir(), $id));
     }
 
     private function uidFromActor(string $actor): string

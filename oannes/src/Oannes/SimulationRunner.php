@@ -31,6 +31,7 @@ final class SimulationRunner
             $this->scenarioNegativeInputs($i);
             $this->scenarioDeliveryDryRun($i);
             $this->scenarioDeliveryDeduplication($i);
+            $this->scenarioDeleteNoteFederates($i);
             $this->scenarioOutboxCreateIdentity($i);
             $this->scenarioNammuFetchThrottle($i);
         }
@@ -528,6 +529,47 @@ final class SimulationRunner
             ob_end_clean();
             $_SERVER = $server;
         }
+    }
+
+    private function scenarioDeleteNoteFederates(int $iteration): void
+    {
+        $env = $this->environment('delete-note-' . $iteration);
+        $graph = new SocialGraph($env['store']);
+        $graph->addFollower('ana', $env['remote']);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $posts = new PostService($env['store'], $users, $env['queue'], $graph, $env['config']);
+        $note = $posts->createNote('ana', 'Nota efímera ' . $iteration);
+        $noteId = (string)$note['id'];
+
+        $this->check('delete: Create is queued before deletion', count($this->deliverJobs($env['queue'])) === 1);
+
+        $posts->deleteNote('ana', $noteId);
+        $jobs = $this->deliverJobs($env['queue']);
+        $delete = $jobs[0]['payload']['activity'] ?? [];
+
+        $this->check('delete: pending Create is dropped, only Delete remains', count($jobs) === 1 && ($delete['type'] ?? null) === 'Delete');
+        $this->check('delete: goes to the same inbox as the Create', ($jobs[0]['payload']['inbox'] ?? null) === $env['remote']['inbox']);
+        $this->check('delete: activity id is <note>#delete', ($delete['id'] ?? null) === $noteId . '#delete');
+        $this->check('delete: object is a Tombstone of the note', ($delete['object']['type'] ?? null) === 'Tombstone' && ($delete['object']['id'] ?? null) === $noteId);
+        $this->check('delete: keeps the note audience', in_array(ActivityPub::PUBLIC_AUDIENCE, $delete['to'] ?? [], true));
+        $this->check('delete: note is gone locally', (new ObjectRepository($env['store']))->findByIdOrAlias($noteId) === null);
+
+        // A Create re-queued by a retry after the deletion must not be sent.
+        $env['queue']->enqueue('deliver', [
+            'actor' => $users->actorId('ana'),
+            'inbox' => 'https://other.test/inbox',
+            'activity' => [
+                'id' => $noteId . '#create',
+                'type' => 'Create',
+                'actor' => $users->actorId('ana'),
+                'object' => ['id' => $noteId, 'type' => 'Note'],
+            ],
+        ]);
+        $stats = (new DeliveryWorker($env['store'], $env['queue'], new KeyStore($env['store']), $env['config']))->run(10);
+        $remaining = $this->deliverJobs($env['queue']);
+
+        $this->check('delete: worker cancels Create of a deleted note', ($stats['cancelled'] ?? 0) === 1);
+        $this->check('delete: Delete itself is still deliverable', count($remaining) === 1 && (($remaining[0]['payload']['activity']['type'] ?? null) === 'Delete'));
     }
 
     private function scenarioOutboxCreateIdentity(int $iteration): void
