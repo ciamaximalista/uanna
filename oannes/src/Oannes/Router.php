@@ -148,6 +148,11 @@ final class Router
             return;
         }
 
+        if ($route === 'mention-suggestions') {
+            $this->mentionSuggestions($method);
+            return;
+        }
+
         if ($route === 'admin/logout') {
             $this->adminLogout($method);
             return;
@@ -3039,6 +3044,77 @@ final class Router
     private function timelineSearchLimit(): int
     {
         return max(80, min(20000, (int)($this->config['timeline_search_limit'] ?? 5000)));
+    }
+
+    /**
+     * Accounts the current user follows, as the composer offers them when
+     * typing "@": local members by bare username, remote ones by full handle.
+     */
+    private function mentionSuggestions(string $method): void
+    {
+        if ($method !== 'GET') {
+            Http::methodNotAllowed();
+            return;
+        }
+
+        $auth = $this->auth ?? new Auth($this->store);
+        $uid = $auth->currentUser();
+        if ($uid === null) {
+            Http::json(['error' => 'unauthorized'], 'application/json', 401);
+            return;
+        }
+
+        $graph = new SocialGraph($this->store);
+        $suggestions = [];
+
+        foreach ($graph->following($uid) as $actor) {
+            $actorId = ActivityPub::objectId($actor);
+            if ($actorId === null) {
+                continue;
+            }
+
+            $localUid = $this->localUidForActorId($actorId);
+            if ($localUid !== null) {
+                $user = $this->users->find($localUid);
+                if ($user === null) {
+                    continue;
+                }
+
+                $suggestions['@' . $localUid] = [
+                    'handle' => '@' . $localUid,
+                    'name' => (string)($user['name'] ?? $localUid),
+                    'avatar' => $this->users->avatarUrl($user),
+                    'local' => true,
+                ];
+                continue;
+            }
+
+            $username = $actor['preferredUsername'] ?? null;
+            $host = parse_url($actorId, PHP_URL_HOST);
+            if (!is_string($username) || $username === '' || !is_string($host) || $host === '') {
+                continue;
+            }
+
+            $handle = '@' . $username . '@' . $host;
+            $info = $this->renderer->actorInfo($actorId);
+            $suggestions[$handle] = [
+                'handle' => $handle,
+                'name' => (string)($actor['name'] ?? $username),
+                'avatar' => (string)($info['avatar'] ?? ''),
+                'local' => false,
+            ];
+        }
+
+        usort($suggestions, static function (array $a, array $b): int {
+            if ($a['local'] !== $b['local']) {
+                return $a['local'] ? -1 : 1;
+            }
+
+            return strcasecmp($a['handle'], $b['handle']);
+        });
+
+        header('Cache-Control: private, no-store');
+        Http::json(['suggestions' => array_values($suggestions)]);
     }
 
     private function timelineMore(string $method): void

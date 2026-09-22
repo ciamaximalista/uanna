@@ -315,10 +315,301 @@
         return true;
     }
 
+    // Mention autocomplete: typing "@" in a message textarea offers the
+    // accounts the user follows (local ones by username, remote ones by full
+    // handle) and narrows the list as the user keeps typing.
+    const mentionState = {
+        textarea: null,
+        list: null,
+        items: [],
+        selected: 0,
+        start: 0,
+        query: '',
+    };
+    let mentionSuggestionsPromise = null;
+    const MENTION_LIMIT = 8;
+
+    function isMentionTextarea(element) {
+        return element instanceof HTMLTextAreaElement && element.name === 'content';
+    }
+
+    function loadMentionSuggestions() {
+        if (mentionSuggestionsPromise) {
+            return mentionSuggestionsPromise;
+        }
+
+        const url = document.body.dataset.mentionsUrl || '';
+        if (url === '') {
+            return Promise.resolve([]);
+        }
+
+        mentionSuggestionsPromise = fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+            .then(function (response) {
+                return response.ok ? response.json() : { suggestions: [] };
+            })
+            .then(function (payload) {
+                return Array.isArray(payload.suggestions) ? payload.suggestions : [];
+            })
+            .catch(function () {
+                mentionSuggestionsPromise = null;
+                return [];
+            });
+
+        return mentionSuggestionsPromise;
+    }
+
+    function mentionQueryAt(textarea) {
+        const caret = textarea.selectionStart;
+        if (caret === null || caret !== textarea.selectionEnd) {
+            return null;
+        }
+
+        const before = textarea.value.slice(0, caret);
+        const match = /(^|[^\w@])@([A-Za-z0-9_.-]*(?:@[A-Za-z0-9.-]*)?)$/.exec(before);
+        if (!match) {
+            return null;
+        }
+
+        return {
+            start: caret - match[2].length - 1,
+            query: match[2],
+        };
+    }
+
+    function filterMentionSuggestions(suggestions, query) {
+        const needle = query.toLowerCase();
+        const matches = suggestions.filter(function (item) {
+            const handle = String(item.handle || '').slice(1).toLowerCase();
+            const name = String(item.name || '').toLowerCase();
+            if (needle === '') {
+                return true;
+            }
+
+            if (needle.indexOf('@') !== -1) {
+                return handle.indexOf(needle) === 0;
+            }
+
+            return handle.indexOf(needle) === 0 || name.indexOf(needle) !== -1;
+        });
+
+        return matches.slice(0, MENTION_LIMIT);
+    }
+
+    function closeMentionList() {
+        if (mentionState.list) {
+            mentionState.list.remove();
+        }
+
+        mentionState.textarea = null;
+        mentionState.list = null;
+        mentionState.items = [];
+        mentionState.selected = 0;
+    }
+
+    function positionMentionList(textarea, list) {
+        const parent = textarea.parentElement;
+        if (!parent) {
+            return;
+        }
+
+        if (getComputedStyle(parent).position === 'static') {
+            parent.style.position = 'relative';
+        }
+
+        list.style.top = (textarea.offsetTop + textarea.offsetHeight) + 'px';
+        list.style.left = textarea.offsetLeft + 'px';
+        list.style.width = textarea.offsetWidth + 'px';
+    }
+
+    function renderMentionList(textarea, items) {
+        if (items.length === 0) {
+            closeMentionList();
+            return;
+        }
+
+        if (mentionState.textarea !== textarea || !mentionState.list) {
+            closeMentionList();
+            const list = document.createElement('ul');
+            list.className = 'mention-suggestions';
+            list.setAttribute('role', 'listbox');
+            textarea.insertAdjacentElement('afterend', list);
+            mentionState.textarea = textarea;
+            mentionState.list = list;
+        }
+
+        mentionState.items = items;
+        mentionState.selected = Math.min(mentionState.selected, items.length - 1);
+        const list = mentionState.list;
+        list.innerHTML = '';
+
+        items.forEach(function (item, index) {
+            const li = document.createElement('li');
+            li.setAttribute('role', 'option');
+            li.dataset.index = String(index);
+            if (index === mentionState.selected) {
+                li.classList.add('is-selected');
+                li.setAttribute('aria-selected', 'true');
+            }
+
+            const avatar = String(item.avatar || '');
+            if (avatar !== '') {
+                const img = document.createElement('img');
+                img.src = avatar;
+                img.alt = '';
+                img.loading = 'lazy';
+                li.appendChild(img);
+            } else {
+                const fallback = document.createElement('span');
+                fallback.className = 'mention-avatar-fallback';
+                fallback.textContent = String(item.handle || '?').slice(1, 2).toUpperCase();
+                li.appendChild(fallback);
+            }
+
+            const text = document.createElement('span');
+            text.className = 'mention-text';
+            const name = document.createElement('strong');
+            name.textContent = String(item.name || item.handle || '');
+            const handle = document.createElement('small');
+            handle.textContent = String(item.handle || '');
+            text.appendChild(name);
+            text.appendChild(handle);
+            li.appendChild(text);
+            list.appendChild(li);
+        });
+
+        positionMentionList(textarea, list);
+    }
+
+    function updateMentionList(textarea) {
+        const token = mentionQueryAt(textarea);
+        if (!token) {
+            closeMentionList();
+            return;
+        }
+
+        mentionState.start = token.start;
+        mentionState.query = token.query;
+
+        loadMentionSuggestions().then(function (suggestions) {
+            const current = mentionQueryAt(textarea);
+            if (!current || document.activeElement !== textarea || current.start !== token.start) {
+                return;
+            }
+
+            if (mentionState.textarea !== textarea || mentionState.query !== current.query) {
+                mentionState.selected = 0;
+            }
+
+            mentionState.query = current.query;
+            renderMentionList(textarea, filterMentionSuggestions(suggestions, current.query));
+        });
+    }
+
+    function insertMention(index) {
+        const textarea = mentionState.textarea;
+        const item = mentionState.items[index];
+        if (!textarea || !item) {
+            return;
+        }
+
+        const caret = textarea.selectionStart;
+        const before = textarea.value.slice(0, mentionState.start);
+        const after = textarea.value.slice(caret);
+        const inserted = String(item.handle || '') + (after.charAt(0) === ' ' ? '' : ' ');
+        textarea.value = before + inserted + after;
+        const position = before.length + inserted.length;
+        textarea.setSelectionRange(position, position);
+        closeMentionList();
+        textarea.focus();
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function moveMentionSelection(delta) {
+        const count = mentionState.items.length;
+        if (count === 0 || !mentionState.list) {
+            return;
+        }
+
+        mentionState.selected = (mentionState.selected + delta + count) % count;
+        mentionState.list.querySelectorAll('li').forEach(function (li, index) {
+            const selected = index === mentionState.selected;
+            li.classList.toggle('is-selected', selected);
+            if (selected) {
+                li.setAttribute('aria-selected', 'true');
+                li.scrollIntoView({ block: 'nearest' });
+            } else {
+                li.removeAttribute('aria-selected');
+            }
+        });
+    }
+
+    function handleMentionKeydown(event) {
+        if (!isMentionTextarea(event.target) || mentionState.textarea !== event.target || !mentionState.list) {
+            return;
+        }
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            moveMentionSelection(1);
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            moveMentionSelection(-1);
+        } else if (event.key === 'Enter' || event.key === 'Tab') {
+            event.preventDefault();
+            insertMention(mentionState.selected);
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeMentionList();
+        }
+    }
+
+    function initMentionAutocomplete() {
+        document.addEventListener('input', function (event) {
+            if (isMentionTextarea(event.target)) {
+                updateMentionList(event.target);
+            }
+        });
+        document.addEventListener('keydown', handleMentionKeydown);
+        document.addEventListener('keyup', function (event) {
+            const caretKeys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+            if (isMentionTextarea(event.target) && mentionState.textarea === event.target && caretKeys.indexOf(event.key) !== -1) {
+                updateMentionList(event.target);
+            }
+        });
+        document.addEventListener('click', function (event) {
+            if (isMentionTextarea(event.target) && mentionState.textarea === event.target) {
+                updateMentionList(event.target);
+            }
+        });
+        document.addEventListener('mousedown', function (event) {
+            const option = event.target.closest('.mention-suggestions li');
+            if (option) {
+                event.preventDefault();
+                insertMention(Number(option.dataset.index || '0'));
+                return;
+            }
+
+            if (mentionState.list && !mentionState.list.contains(event.target) && event.target !== mentionState.textarea) {
+                closeMentionList();
+            }
+        });
+        document.addEventListener('focusout', function (event) {
+            if (event.target === mentionState.textarea) {
+                window.setTimeout(function () {
+                    if (document.activeElement !== mentionState.textarea) {
+                        closeMentionList();
+                    }
+                }, 150);
+            }
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.image-cropper').forEach(initCropper);
         document.querySelectorAll('input[type="file"]').forEach(updatePostImageInput);
         document.querySelectorAll('.timeline-more').forEach(initInfiniteTimeline);
+        initMentionAutocomplete();
         document.addEventListener('change', function (event) {
             updatePostImageInput(event.target);
         }, true);

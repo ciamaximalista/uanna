@@ -101,6 +101,9 @@ final class Renderer
         $panelLink = $this->panelNavLink();
         $adminLink = $this->adminNavLink();
         $footer = $this->siteFooter($name);
+        $mentionsUrl = $composer['modal'] !== ''
+            ? ' data-mentions-url="' . Html::escape($this->publicUrl(['route' => 'mention-suggestions'])) . '"'
+            : '';
 
         return "<!doctype html>\n"
             . '<html lang="' . $language . '"><head><meta charset="utf-8"/>'
@@ -110,7 +113,7 @@ final class Renderer
             . "<link rel=\"apple-touch-icon\" href=\"{$favicon}\"/>"
             . "<link rel=\"stylesheet\" href=\"{$style}\"/>"
             . "<script defer src=\"{$cropScript}\"></script>"
-            . "</head><body><header class=\"topbar\">{$brand}"
+            . "</head><body{$mentionsUrl}><header class=\"topbar\">{$brand}"
             . "<nav class=\"navlinks\"><a href=\"{$home}\">" . Html::escape($this->t('nav.home', 'Inicio')) . "</a>{$panelLink}{$adminLink}{$composer['button']}</nav></header>"
             . "<main>{$body}</main>{$footer}{$composer['modal']}</body></html>";
     }
