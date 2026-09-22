@@ -22,6 +22,12 @@ return [
     'opportunistic_workers_cooldown_seconds' => 15,
     'opportunistic_inbox_limit' => 5,
     'opportunistic_delivery_limit' => 2,
+    // Cupo por minuto para GET de objetos desde Nammu: por IP y, si firma con un actor ya
+    // conocido, cupo propio más amplio. Retry-After anuncia lo que falta de la ventana.
+    'nammu_global_limit' => 90,
+    'nammu_path_limit' => 30,
+    'nammu_signed_global_limit' => 600,
+    'nammu_signed_path_limit' => 60,
     'default_locale' => 'es',
     'timezone' => 'Europe/Madrid',
     'max_attachment_bytes' => 25 * 1024 * 1024,

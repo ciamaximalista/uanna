@@ -32,6 +32,7 @@ final class SimulationRunner
             $this->scenarioDeliveryDryRun($i);
             $this->scenarioDeliveryDeduplication($i);
             $this->scenarioOutboxCreateIdentity($i);
+            $this->scenarioNammuFetchThrottle($i);
         }
 
         $failed = array_values(array_filter($this->checks, static fn (array $check): bool => !$check['ok']));
@@ -455,6 +456,78 @@ final class SimulationRunner
 
         $this->check('delivery dedup returns same pending id', $first === $second && count($pending) === 1);
         $this->check('delivery dedup does not requeue completed id', $third === $first && count($this->deliverJobs($env['queue'])) === 0);
+    }
+
+    private function scenarioNammuFetchThrottle(int $iteration): void
+    {
+        $env = $this->environment('nammu-throttle-' . $iteration);
+        $users = new LocalUsers($env['store'], $env['config']);
+        $note = (new PostService($env['store'], $users, $env['queue'], new SocialGraph($env['store']), $env['config']))
+            ->createNote('ana', 'Throttled note ' . $iteration);
+        $path = (string)parse_url((string)($note['id'] ?? ''), PHP_URL_PATH);
+        $config = $env['config'] + ['nammu_global_limit' => 3, 'nammu_signed_global_limit' => 6];
+        $router = new Router(
+            $config,
+            $env['store'],
+            new ObjectRepository($env['store']),
+            new Renderer(new ObjectRepository($env['store']), $config),
+            $users,
+        );
+        $throttle = new \ReflectionMethod($router, 'throttleRepeatedNammuFetch');
+        $throttle->setAccessible(true);
+        $signature = new HttpSignature();
+        $server = $_SERVER;
+
+        $request = static function (array $headers) use ($path): void {
+            $_SERVER['REQUEST_URI'] = $path;
+            $_SERVER['REMOTE_ADDR'] = '203.0.113.7';
+            $_SERVER['HTTP_USER_AGENT'] = 'Nammu Fediverso';
+            foreach (['HTTP_SIGNATURE', 'HTTP_DATE', 'HTTP_HOST'] as $name) {
+                unset($_SERVER[$name]);
+            }
+            foreach ($headers as $name => $value) {
+                $_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $name))] = $value;
+            }
+        };
+
+        ob_start();
+        try {
+            $unsigned = [];
+            for ($i = 0; $i < 4; $i++) {
+                $request([]);
+                $unsigned[] = $throttle->invoke($router, 'GET');
+            }
+
+            $this->check('unsigned nammu fetch passes within limit', $unsigned[2] === false);
+            $this->check('unsigned nammu fetch throttled over limit', $unsigned[3] === true);
+
+            $signedHeaders = $signature->signedGetHeaders(
+                $env['config']['base_url'] . $path,
+                $env['remote_actor'] . '#main-key',
+                $env['remote_private']
+            );
+            $signed = [];
+            for ($i = 0; $i < 7; $i++) {
+                $request($signedHeaders);
+                $signed[] = $throttle->invoke($router, 'GET');
+            }
+
+            $this->check('signed known actor keeps its own quota', $signed[0] === false && $signed[5] === false);
+            $this->check('signed known actor throttled over its limit', $signed[6] === true);
+
+            $forged = $signedHeaders;
+            $forged['Signature'] = str_replace('signature="', 'signature="AAAA', (string)$forged['Signature']);
+            $request($forged);
+            $this->check('forged signature falls back to shared quota', $throttle->invoke($router, 'GET') === true);
+
+            $request([]);
+            $request(['Date' => gmdate('D, d M Y H:i:s \G\M\T')]);
+            $_SERVER['REQUEST_URI'] = '/u/ana';
+            $this->check('actor fetch is not throttled', $throttle->invoke($router, 'GET') === false);
+        } finally {
+            ob_end_clean();
+            $_SERVER = $server;
+        }
     }
 
     private function scenarioOutboxCreateIdentity(int $iteration): void

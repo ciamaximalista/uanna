@@ -123,6 +123,17 @@ final class Router
             return;
         }
 
+        if (preg_match('#^legacy-replies/([^/]+)/p/([^/]+)$#', $route, $match)) {
+            header('Cache-Control: public, max-age=86400');
+            header('Location: ' . $this->localPostUrl($match[1], $match[2]) . '/replies', true, 301);
+            return;
+        }
+
+        if (preg_match('#^u/([^/]+)/activity/([a-z]+)/([^/]+)$#', $route, $match)) {
+            $this->localActivity($match[1], $match[2], $match[3]);
+            return;
+        }
+
         if (preg_match('#^u/([^/]+)/(followers|following)$#', $route, $match)) {
             $this->socialCollection($match[1], $match[2]);
             return;
@@ -328,6 +339,14 @@ final class Router
             return $path;
         }
 
+        if (preg_match('#^u/[a-zA-Z0-9_-]+/activity/[a-z]+/[^/]+$#', $path)) {
+            return $path;
+        }
+
+        if (preg_match('#^([a-zA-Z0-9_-]{1,64})/p/([^/]+)/replies$#', $path, $match) && $this->users->find($match[1]) !== null) {
+            return 'legacy-replies/' . $match[1] . '/p/' . $match[2];
+        }
+
         if (preg_match('#^([a-zA-Z0-9_-]{1,64})/(outbox|inbox|followers|following)$#', $path, $match) && $this->users->find($match[1]) !== null) {
             return 'legacy-user/' . $match[1] . '/' . $match[2];
         }
@@ -342,9 +361,15 @@ final class Router
 
         $id = rtrim((string)$this->config['base_url'], '/') . '/' . $path;
 
-        if (preg_match('#^u/[a-zA-Z0-9_-]+/p/[^/]+$#', $path) === 1) {
+        if (preg_match('#^u/([a-zA-Z0-9_-]+)/p/([^/]+)$#', $path, $match) === 1) {
             if (is_file(Id::objectPath($this->store->dataDir(), $id))) {
                 $_GET['id'] = $id;
+                return '';
+            }
+
+            $legacyId = $this->localPostLegacyId($match[1], $match[2]);
+            if ($legacyId !== null && $this->repo->findByIdOrAlias($legacyId) !== null) {
+                $_GET['id'] = $legacyId;
                 return '';
             }
 
@@ -665,7 +690,7 @@ final class Router
         }
 
         $items = $this->publicReplyItems($id);
-        $collectionId = $id . '/replies';
+        $collectionId = $this->localRepliesCollectionId($id);
         $object['replies'] = [
             'id' => $collectionId,
             'type' => 'OrderedCollection',
@@ -716,7 +741,7 @@ final class Router
             }
         }
 
-        $collectionId = $id . '/replies';
+        $collectionId = $this->localRepliesCollectionId($id);
         $object['replies'] = [
             'id' => $collectionId,
             'type' => 'OrderedCollection',
@@ -757,20 +782,88 @@ final class Router
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
         $addr = is_string($remoteAddr) ? $remoteAddr : '';
 
-        if ($this->incrementThrottleCount('nammu-global ' . $addr) > 90) {
-            Http::tooManyRequests(300);
+        // Un actor conocido que firma sus GET tiene cupo propio y más amplio: una instancia
+        // que resuelve varios Announce seguidos necesita ese ritmo. El resto comparte el cupo por IP.
+        $signedActor = $this->signedKnownActorId($method);
+        if ($signedActor !== null) {
+            $scope = 'nammu-actor ' . $signedActor;
+            $globalLimit = (int)($this->config['nammu_signed_global_limit'] ?? 600);
+            $pathLimit = (int)($this->config['nammu_signed_path_limit'] ?? 60);
+        } else {
+            $scope = 'nammu-global ' . $addr;
+            $globalLimit = (int)($this->config['nammu_global_limit'] ?? 90);
+            $pathLimit = (int)($this->config['nammu_path_limit'] ?? 30);
+        }
+
+        $global = $this->incrementThrottleCount($scope);
+        if ($global['count'] > $globalLimit) {
+            Http::tooManyRequests($global['retry_after']);
             return true;
         }
 
-        if ($this->incrementThrottleCount('nammu-path ' . $addr . ' ' . $path) <= 30) {
+        $perPath = $this->incrementThrottleCount($scope . ' ' . $path);
+        if ($perPath['count'] <= $pathLimit) {
             return false;
         }
 
-        Http::tooManyRequests(300);
+        Http::tooManyRequests($perPath['retry_after']);
         return true;
     }
 
-    private function incrementThrottleCount(string $key): int
+    /**
+     * Id del actor remoto que firma la petición, solo si ya está en caché local
+     * y la firma verifica con su clave. No se resuelven actores desconocidos.
+     */
+    private function signedKnownActorId(string $method): ?string
+    {
+        $headers = Http::requestHeaders();
+        $signature = new HttpSignature();
+        $keyId = $signature->keyId($headers);
+
+        if ($keyId === null) {
+            return null;
+        }
+
+        $actorId = strtok($keyId, '#');
+        if (!is_string($actorId) || $actorId === '') {
+            return null;
+        }
+
+        $actorPath = Id::actorPath($this->store->dataDir(), $actorId);
+        if (!is_file($actorPath)) {
+            return null;
+        }
+
+        try {
+            $actor = $this->store->readJson($actorPath);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $key = $actor['publicKey'] ?? null;
+        if (!is_array($key) || ($key['id'] ?? null) !== $keyId || !is_string($key['publicKeyPem'] ?? null)) {
+            return null;
+        }
+
+        if (!in_array('(request-target)', $signature->signedHeaderNames($headers), true)) {
+            return null;
+        }
+
+        if (!$signature->verifyRequest($headers, strtolower($method), Http::requestTarget(), $key['publicKeyPem'])) {
+            return null;
+        }
+
+        $id = $actor['id'] ?? $actorId;
+        return is_string($id) && $id !== '' ? $id : $actorId;
+    }
+
+    /**
+     * Contador por ventana fija de 60 s. Devuelve el conteo y los segundos que faltan
+     * para que la ventana se reinicie, que es lo que se anuncia en Retry-After.
+     *
+     * @return array{count: int, retry_after: int}
+     */
+    private function incrementThrottleCount(string $key): array
     {
         $counterPath = $this->store->dataDir() . '/cache/request-throttle/' . Id::digest($key) . '.json';
         $now = time();
@@ -791,14 +884,15 @@ final class Router
         }
 
         $state['count']++;
+        $retryAfter = max(1, 60 - ($now - $state['window']));
 
         try {
             $this->store->writeJson($counterPath, $state);
         } catch (\Throwable) {
-            return 0;
+            return ['count' => 0, 'retry_after' => $retryAfter];
         }
 
-        return $state['count'];
+        return ['count' => $state['count'], 'retry_after' => $retryAfter];
     }
 
     private function nodeInfoLinks(): void
@@ -976,6 +1070,74 @@ final class Router
         ]);
     }
 
+    private function localPostUrl(string $uid, string $postId): string
+    {
+        return rtrim((string)$this->config['base_url'], '/') . '/u/' . rawurlencode($uid) . '/p/' . $postId;
+    }
+
+    /**
+     * Id con el que se guardaron las publicaciones anteriores a la ruta /u/<uid>/p/<id>,
+     * o null si la instancia no tiene ruta de actor distinta de la canónica.
+     */
+    private function localPostLegacyId(string $uid, string $postId): ?string
+    {
+        $base = rtrim((string)$this->config['base_url'], '/');
+        $actorPath = (string)($this->config['local_actor_path'] ?? '');
+
+        if ($actorPath === '/u') {
+            return null;
+        }
+
+        return $base . $actorPath . '/' . rawurlencode($uid) . '/p/' . $postId;
+    }
+
+    private function localRepliesCollectionId(string $objectId): string
+    {
+        $base = rtrim((string)$this->config['base_url'], '/');
+        $actorPath = (string)($this->config['local_actor_path'] ?? '');
+
+        if (preg_match('#^' . preg_quote($base . $actorPath, '#') . '/([a-zA-Z0-9_-]+)/p/([^/]+)$#', $objectId, $match) === 1) {
+            return $this->localPostUrl($match[1], $match[2]) . '/replies';
+        }
+
+        return $objectId . '/replies';
+    }
+
+    private function localActivity(string $uid, string $type, string $stamp): void
+    {
+        if ($this->users->find($uid) === null || !in_array($type, ['like', 'announce'], true)) {
+            Http::notFound();
+            return;
+        }
+
+        $id = rtrim((string)$this->config['base_url'], '/') . '/u/' . rawurlencode($uid) . '/activity/' . $type . '/' . $stamp;
+        $dir = $this->store->dataDir() . '/interactions/local/' . $uid;
+        $files = is_dir($dir) ? glob($dir . '/*.json') : false;
+
+        foreach (is_array($files) ? $files : [] as $file) {
+            try {
+                $activity = $this->store->readJson($file);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if (($activity['id'] ?? null) !== $id) {
+                continue;
+            }
+
+            $object = is_string($activity['object'] ?? null) ? $this->repo->findByIdOrAlias($activity['object']) : null;
+            if ($object !== null && $this->objectBlocked($object)) {
+                break;
+            }
+
+            Http::activityJson($activity);
+            return;
+        }
+
+        header('Cache-Control: public, max-age=60');
+        Http::notFound();
+    }
+
     private function repliesCollection(string $uid, string $postId): void
     {
         if ($this->users->find($uid) === null) {
@@ -983,8 +1145,15 @@ final class Router
             return;
         }
 
-        $objectId = rtrim((string)$this->config['base_url'], '/') . '/u/' . rawurlencode($uid) . '/p/' . $postId;
+        $objectId = $this->localPostUrl($uid, $postId);
         $object = $this->repo->findByIdOrAlias($objectId);
+
+        if ($object === null) {
+            $legacyId = $this->localPostLegacyId($uid, $postId);
+            $object = $legacyId !== null ? $this->repo->findByIdOrAlias($legacyId) : null;
+            $objectId = $object !== null ? (ActivityPub::objectId($object) ?? $objectId) : $objectId;
+        }
+
         $actor = is_array($object) ? ActivityPub::attributedTo($object) : null;
 
         if ($object === null || $actor === null || !in_array($actor, array_merge([$this->users->actorId($uid)], $this->users->legacyActorIds($uid)), true)) {
@@ -998,7 +1167,7 @@ final class Router
         }
 
         $items = $this->publicReplyItems($objectId);
-        $collectionId = $objectId . '/replies';
+        $collectionId = $this->localPostUrl($uid, $postId) . '/replies';
         $isPage = (string)($_GET['page'] ?? '') === 'true';
 
         if ($isPage) {
